@@ -14,13 +14,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+// Hintergrundfarbe — dunkles Blau
+// Quelle: moco202613composablesmodifier.pdf — background
 val DarkBackground = Color(0xFF0D1B2A)
+
+// TeRun Blau — für Logo und Button
 val TeRunBlue = Color(0xFF1A6FF5)
 
 @Composable
@@ -28,7 +31,7 @@ fun LoginScreen(
     onStartClicked: () -> Unit,
     onLoginClicked: () -> Unit
 ) {
-    // Box füllt den ganzen Bildschirm
+    // Box füllt den ganzen Bildschirm mit dunklem Hintergrund
     // Quelle: moco202613composablesmodifier.pdf — fillMaxSize, background
     Box(
         modifier = Modifier
@@ -36,7 +39,7 @@ fun LoginScreen(
             .background(DarkBackground),
         contentAlignment = Alignment.Center
     ) {
-        // Column stapelt alle Elemente untereinander
+        // Column stapelt alle Elemente untereinander, zentriert
         // Quelle: moco202612creatingcomposables.pdf — Column
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -44,9 +47,10 @@ fun LoginScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 32.dp)
+                .padding(bottom = 80.dp)
         ) {
 
-            // Logo-Box — blaues Quadrat mit T
+            // Logo — blaues abgerundetes Quadrat mit T
             // Quelle: moco202613composablesmodifier.pdf — clip, background, size
             Box(
                 modifier = Modifier
@@ -55,31 +59,43 @@ fun LoginScreen(
                     .background(TeRunBlue),
                 contentAlignment = Alignment.Center
             ) {
-                // Canvas zeichnet das geschwungene T
+                // Canvas zeichnet das T mit schräger Lücke
                 // Quelle: developer.android.com/develop/ui/compose/graphics/draw/overview
                 Canvas(modifier = Modifier.size(56.dp)) {
                     val w = size.width
                     val h = size.height
-                    val path = Path().apply {
-                        moveTo(w * 0.15f, h * 0.18f)
-                        cubicTo(w * 0.3f, h * 0.08f, w * 0.7f, h * 0.08f, w * 0.88f, h * 0.18f)
-                        moveTo(w * 0.55f, h * 0.18f)
-                        cubicTo(
-                            w * 0.55f, h * 0.45f,
-                            w * 0.38f, h * 0.65f,
-                            w * 0.18f, h * 0.92f
-                        )
+
+                    // Linker Teil des Querbalkens
+                    val querbalkenLinks = Path().apply {
+                        moveTo(w * 0.02f, h * 0.04f)
+                        lineTo(w * 0.18f, h * 0.04f)
+                        lineTo(w * 0.22f, h * 0.26f)
+                        lineTo(w * 0.02f, h * 0.26f)
+                        close()
                     }
-                    drawPath(
-                        path = path,
-                        color = Color.White,
-                        style = Stroke(
-                            width = 7.dp.toPx(),
-                            cap = androidx.compose.ui.graphics.StrokeCap.Round
-                        )
-                    )
+                    drawPath(querbalkenLinks, color = Color.White)
+
+                    // Rechter Teil des Querbalkens
+                    val querbalkenRechts = Path().apply {
+                        moveTo(w * 0.30f, h * 0.04f)
+                        lineTo(w * 0.98f, h * 0.04f)
+                        lineTo(w * 0.98f, h * 0.26f)
+                        lineTo(w * 0.34f, h * 0.26f)
+                        close()
+                    }
+                    drawPath(querbalkenRechts, color = Color.White)
+
+                    // Gerader schräger Strich nach unten links
+                    val senkrecht = Path().apply {
+                        moveTo(w * 0.34f, h * 0.26f)
+                        lineTo(w * 0.54f, h * 0.26f)
+                        lineTo(w * 0.22f, h * 0.98f)
+                        lineTo(w * 0.02f, h * 0.98f)
+                        close()
+                    }
+                    drawPath(senkrecht, color = Color.White)
                 }
-            } // ← schließt die Logo-Box
+            }
 
             Spacer(modifier = Modifier.height(20.dp))
 
@@ -87,7 +103,7 @@ fun LoginScreen(
             // Quelle: moco202612creatingcomposables.pdf — Text
             Text(
                 text = "TeRun",
-                fontSize = 36.sp,
+                fontSize = 42.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
@@ -97,20 +113,20 @@ fun LoginScreen(
             // Untertitel
             Text(
                 text = "Territory Run",
-                fontSize = 14.sp,
+                fontSize = 17.sp,
                 color = Color.White.copy(alpha = 0.45f)
             )
 
             Spacer(modifier = Modifier.height(56.dp))
 
-            // Primär-Button
+            // Primär-Button — blau ausgefüllt
             // Quelle: moco202612creatingcomposables.pdf — Button
             // Externe Quelle: developer.android.com/develop/ui/compose/components/button
             Button(
                 onClick = onStartClicked,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp),
+                    .height(60.dp),
                 shape = RoundedCornerShape(26.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = TeRunBlue
@@ -126,13 +142,13 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Ghost-Button
+            // Ghost-Button — transparent mit weißem Rand
             // Externe Quelle: developer.android.com/develop/ui/compose/components/button
             OutlinedButton(
                 onClick = onLoginClicked,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp),
+                    .height(60.dp),
                 shape = RoundedCornerShape(26.dp),
                 border = androidx.compose.foundation.BorderStroke(
                     1.5.dp,
@@ -149,10 +165,11 @@ fun LoginScreen(
                     color = Color.White
                 )
             }
-        } // ← schließt Column
-    } // ← schließt Box
-} // ← schließt LoginScreen
+        }
+    }
+}
 
+// Preview
 // Quelle: moco202612creatingcomposables.pdf — @Preview
 @Preview(showBackground = true)
 @Composable
