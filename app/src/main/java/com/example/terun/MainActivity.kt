@@ -1,47 +1,101 @@
+// Datei: MainActivity.kt
+// Paket: com.example.terun
+
 package com.example.terun
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import com.example.terun.ui.theme.TeRunTheme
+import kotlinx.serialization.Serializable
+
+// Routen — jede Route ist ein eigener Screen
+// Quelle: moco202616navigation.pdf — @Serializable Routen
+@Serializable object LoginRoute
+@Serializable object SignInRoute
+@Serializable object RegisterRoute
+@Serializable object HomeRoute
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // setContent startet die Compose UI
+        // Quelle: moco202608appcomponents.pdf — Activity
         setContent {
             TeRunTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+                TeRunApp()
             }
         }
     }
 }
 
+// Haupt-Composable mit Navigation
+// Quelle: moco202616navigation.pdf — NavController, NavHost
 @Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
+fun TeRunApp() {
 
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    TeRunTheme {
-        Greeting("Android")
+    // NavController merkt sich welcher Screen gerade aktiv ist
+    // Quelle: moco202616navigation.pdf — rememberNavController
+    val navController = rememberNavController()
+
+    // NavHost definiert alle Screens und ihre Routen
+    // Quelle: moco202616navigation.pdf — NavHost, composable
+    NavHost(
+        navController = navController,
+        startDestination = LoginRoute
+    ) {
+
+        // LoginScreen — Startscreen
+        composable<LoginRoute> {
+            LoginScreen(
+                onSignInClicked = {
+                    navController.navigate(SignInRoute)
+                },
+                onRegisterClicked = {
+                    navController.navigate(RegisterRoute)
+                }
+            )
+        }
+
+        // SignInScreen — Anmelden
+        composable<SignInRoute> {
+            SignInScreen(
+                onSignInClicked = {
+                    navController.navigate(HomeRoute)
+                },
+                onRegisterClicked = {
+                    navController.navigate(RegisterRoute)
+                }
+            )
+        }
+
+        // RegisterScreen — Registrieren
+        composable<RegisterRoute> {
+            RegisterScreen(
+                onRegisterClicked = {
+                    navController.navigate(HomeRoute)
+                },
+                onSignInClicked = {
+                    navController.navigate(SignInRoute)
+                }
+            )
+        }
+
+        // HomeScreen — Hauptscreen (kommt als nächstes)
+        composable<HomeRoute> {
+            // Platzhalter bis HomeScreen fertig ist
+            // Quelle: moco202612creatingcomposables.pdf — Text
+            androidx.compose.material3.Text(
+                text = "HomeScreen kommt bald",
+                color = androidx.compose.ui.graphics.Color.White
+            )
+        }
     }
 }
