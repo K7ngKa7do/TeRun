@@ -54,5 +54,8 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
     implementation(libs.androidx.compose.ui.tooling)
+    implementation("org.osmdroid:osmdroid-android:6.1.18")
+    implementation("androidx.compose.material:material-icons-extended:1.7.0")
+    implementation("androidx.navigation:navigation-compose:2.8.0")
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
