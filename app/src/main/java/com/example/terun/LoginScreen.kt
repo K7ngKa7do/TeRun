@@ -1,3 +1,10 @@
+// Datei: LoginScreen.kt
+// Paket: com.example.terun
+// Quelle: moco202611declarativeui.pdf — Deklaratives UI-Paradigma, @Composable Annotation
+// Quelle: moco202612creatingcomposables.pdf — Column, Button, Text, @Preview
+// Quelle: moco202613composablesmodifier.pdf — Modifier, fillMaxSize, background, padding, clip, size
+// Quelle: moco202617pixeldensities.pdf — Verwendung von dp und sp statt px
+
 package com.example.terun
 
 import androidx.compose.foundation.background
@@ -17,14 +24,13 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-val DarkBackground = Color(0xFF0D1B2A)
-val TeRunBlue = Color(0xFF1A6FF5)
-
+// Startscreen der TeRun-App (Splash-Screen)
 @Composable
 fun LoginScreen(
     onSignInClicked: () -> Unit,
     onRegisterClicked: () -> Unit
 ) {
+    // Äußerer Container für den gesamten Screen
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -39,10 +45,12 @@ fun LoginScreen(
                 .padding(horizontal = 32.dp)
                 .padding(bottom = 80.dp)
         ) {
+            // TeRun-Logo aus TeRunLogo.kt
             TeRunLogo(size = 88.dp)
 
             Spacer(modifier = Modifier.height(20.dp))
 
+            // Großer App-Name
             Text(
                 text = "TeRun",
                 fontSize = 42.sp,
@@ -52,6 +60,7 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // App-Untertitel
             Text(
                 text = "Territory Run",
                 fontSize = 17.sp,
@@ -60,6 +69,7 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(56.dp))
 
+            // Anmelden Button (Primary Button)
             Button(
                 onClick = onSignInClicked,
                 modifier = Modifier
@@ -80,6 +90,7 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // Registrieren Button (Outlined Button)
             OutlinedButton(
                 onClick = onRegisterClicked,
                 modifier = Modifier
@@ -109,7 +120,7 @@ fun LoginScreen(
 @Composable
 fun LoginScreenPreview() {
     LoginScreen(
-        onSignInClicked= {},
+        onSignInClicked = {},
         onRegisterClicked = {}
     )
 }

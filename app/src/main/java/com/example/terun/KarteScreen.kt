@@ -1,29 +1,19 @@
-
+// Datei: KarteScreen.kt
+// Paket: com.example.terun
+// Quelle: moco202612creatingcomposables.pdf — Column, Row, Box, Scaffold, Button, Text
+// Quelle: moco202613composablesmodifier.pdf — Modifier-Verwendung (weight, padding, background, shape)
+// Quelle: moco202614recompositionstates.pdf — Statusverwaltung mit remember und mutableStateOf
+// Quelle: moco202618mvvm.pdf — MVVM mit ViewModel zur Trennung von UI und Spiellogik
 
 package com.example.terun
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -31,30 +21,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 
-// Rot fuer den "Aufgeben"-Button. (Liegt sonst in DuellLaueftScreen.kt als EnemyRed,
-// hier eine eigene Konstante, damit dieser Screen unabhaengig erklaert werden kann.)
-val AufgebenRot = Color(0xFFD64545)
-
-// Gruen fuer den Badge "2 / 3 Spots" waehrend ein Duell laeuft.
-val BadgeGruen = Color(0xFF2E9E6B)
-
-
-enum class Tab { KARTE, DUELLE, RANGLISTE, PROFIL }
-
+// Einfacher Platzhalter-Screen für Tabs, die noch in Arbeit sind
 @Composable
 fun PlatzhalterScreen(titel: String) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
         Text(text = titel, color = Color.White, fontSize = 18.sp)
     }
 }
 
+// Haupt-Screen für den "Karte"-Tab. Verwaltet das Bottom-Menü und
+// delegiert die Anzeige je nach Zustand an Idle-Karte, Aktives Duell oder Endstand.
 @Composable
 fun KarteScreen(viewModel: KarteViewModel = viewModel()) {
-
+    // Merkt sich den aktuell ausgewählten Tab in der Navigation Bar
     var aktiverTab by remember { mutableStateOf(Tab.KARTE) }
-
     val status = viewModel.status
-
 
     Scaffold(
         bottomBar = {
@@ -64,7 +48,7 @@ fun KarteScreen(viewModel: KarteViewModel = viewModel()) {
             )
         }
     ) { paddingValues ->
-
+        // Inhalt je nach ausgewähltem Tab
         when (aktiverTab) {
             Tab.KARTE -> {
                 Column(
@@ -73,47 +57,59 @@ fun KarteScreen(viewModel: KarteViewModel = viewModel()) {
                         .background(DarkBackground)
                         .padding(paddingValues)
                 ) {
-
-                    // Wenn das Spiel beendet ist, zeigen wir statt der Karte die Ergebnisliste.
                     if (status == SpielStatus.BEENDET) {
-
-                        // EndScreen bekommt:
-
+                        // Zustand BEENDET: Zeige das Leaderboard (Endstand)
                         EndScreen(
                             ergebnisse = viewModel.ergebnisse,
                             onZurueck = { viewModel.zurueckZurKarte() }
                         )
-
                     } else {
-                        // Zustand IDLE oder LAEUFT: Karte anzeigen.
+                        // Zustand IDLE oder LAEUFT: Karte mit TopBar anzeigen
                         val duellLaeuft = (status == SpielStatus.LAEUFT)
 
-                        // ---- OBERE LEISTE ----
+                        // 1. Obere Statusleiste
                         KarteTopBar(duellLaeuft = duellLaeuft)
 
-                        // ---- DIE KARTE (mittlerer Bereich) ----
-                        // weight(1f) heisst: nimm den ganzen freien Platz zwischen TopBar und Button ein.
+                        // 2. Kartenbereich (nimmt den restlichen freien Platz ein)
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
                                 .background(MapDark)
                         ) {
-                            TeRunMapBackground()
+                            // Straßen werden nur gezeichnet, wenn das Duell aktiv läuft
+                            TeRunMapBackground(showStreets = duellLaeuft)
 
-                            // Die drei Spots. Vorerst fest eingetragen (statisch).
-                            MapSpot(x = 0.25f, y = 0.22f, color = SpotBlue)
-                            MapSpot(x = 0.58f, y = 0.40f, color = SpotBlue)
-                            MapSpot(x = 0.72f, y = 0.62f, color = SpotBlue)
+                            if (duellLaeuft) {
+                                // AKTIVES DUELL:
+                                // Zwei grüne Spots (erreicht) und ein blauer Spot (offen) mit Leuchtaura
+                                MapSpot(x = 0.25f, y = 0.22f, color = ActiveGreen, hasGlow = true)
+                                MapSpot(x = 0.58f, y = 0.40f, color = ActiveGreen, hasGlow = true)
+                                MapSpot(x = 0.72f, y = 0.62f, color = SpotBlue, hasGlow = false)
 
-                            MyPositionMarker(x = 0.44f, y = 0.48f)
-                            FinishFlag(x = 0.80f, y = 0.80f)
+                                // Spieler (Orange) und Gegner (Rot) mit innerem Kern
+                                PlayerMarker(x = 0.52f, y = 0.47f, color = SpotOrange, hasInnerDot = true)
+                                PlayerMarker(x = 0.60f, y = 0.43f, color = EnemyRed, hasInnerDot = true)
+
+                                FinishFlag(x = 0.80f, y = 0.80f)
+
+                                // Info-Kästchen unten über die Karte gelegt
+                                DuelInfoPanel()
+                            } else {
+                                // IDLE ZUSTAND (Vor dem Start):
+                                // Drei blaue Spots, eigene Position ohne inneren Kern
+                                MapSpot(x = 0.25f, y = 0.22f, color = SpotBlue)
+                                MapSpot(x = 0.58f, y = 0.40f, color = SpotBlue)
+                                MapSpot(x = 0.72f, y = 0.62f, color = SpotBlue)
+
+                                PlayerMarker(x = 0.44f, y = 0.48f, color = SpotOrange)
+
+                                FinishFlag(x = 0.80f, y = 0.80f)
+                            }
                         }
 
-
-                        // if/else entscheidet anhand des Zustands, welcher Button gezeigt wird.
+                        // 3. Steuerungs-Button unter der Karte
                         if (!duellLaeuft) {
-                            // Zustand IDLE: blauer Button -> startet das Duell
                             Button(
                                 onClick = { viewModel.duellStarten() },
                                 modifier = Modifier
@@ -130,8 +126,6 @@ fun KarteScreen(viewModel: KarteViewModel = viewModel()) {
                                 )
                             }
                         } else {
-
-                            // fuehrt zum End-Screen (status = BEENDET).
                             Button(
                                 onClick = { viewModel.duellBeenden() },
                                 modifier = Modifier
@@ -152,29 +146,16 @@ fun KarteScreen(viewModel: KarteViewModel = viewModel()) {
                     }
                 }
             }
-            Tab.DUELLE -> {
-                Box(modifier = Modifier.fillMaxSize().background(DarkBackground).padding(paddingValues)) {
-                    PlatzhalterScreen(titel = "Duelle\nIn Arbeit")
-                }
-            }
-            Tab.RANGLISTE -> {
-                Box(modifier = Modifier.fillMaxSize().background(DarkBackground).padding(paddingValues)) {
-                    PlatzhalterScreen(titel = "Rangliste \nIn Arbeit")
-                }
-            }
-            Tab.PROFIL -> {
-                Box(modifier = Modifier.fillMaxSize().background(DarkBackground).padding(paddingValues)) {
-                    PlatzhalterScreen(titel = "Profil \nIn Arbeit")
-                }
-            }
+            Tab.DUELLE -> PlatzhalterScreen("Duelle\nIn Arbeit")
+            Tab.RANGLISTE -> PlatzhalterScreen("Rangliste\nIn Arbeit")
+            Tab.PROFIL -> PlatzhalterScreen("Profil\nIn Arbeit")
         }
     }
 }
 
-
+// Obere Statusleiste des Karten-Bildschirms
 @Composable
 fun KarteTopBar(duellLaeuft: Boolean) {
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -183,18 +164,15 @@ fun KarteTopBar(duellLaeuft: Boolean) {
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-
-        // Titel links: wechselt zwischen "TeRun" und "Duell läuft".
         Text(
             text = if (duellLaeuft) "Duell läuft" else "TeRun",
             color = Color.White,
             fontWeight = FontWeight.Bold
         )
 
-        // Spacer schiebt den Badge nach ganz rechts.
         Spacer(modifier = Modifier.weight(1f))
 
-        // Badge rechts: grau im Idle, gruen waehrend des Duells.
+        // Zeigt "2 / 3 Spots" an, wenn das Duell läuft, ansonsten "Kein Duell aktiv"
         Box(
             modifier = Modifier
                 .background(
@@ -213,22 +191,95 @@ fun KarteTopBar(duellLaeuft: Boolean) {
     }
 }
 
-// ============================================================================
-//  END-SCREEN — wird nach Spielende ("Aufgeben") angezeigt.
-//  Zeigt die Endplatzierung: Platz, Name, Punkte.
-// ============================================================================
+// Info-Panel-Card am unteren Rand der Karte während eines Duells
+@Composable
+fun BoxScope.DuelInfoPanel() {
+    Column(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(horizontal = 14.dp, vertical = 14.dp)
+            .fillMaxWidth()
+            .background(
+                Color(0xFF0B1118).copy(alpha = 0.88f),
+                RoundedCornerShape(16.dp)
+            )
+            .padding(16.dp)
+    ) {
+        Text(
+            text = "Aktives Duell",
+            color = Color.White,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold
+        )
 
-// Der End-Screen bekommt zwei Dinge von aussen:
-//  - ergebnisse: die Liste der Spieler (vorerst Beispiel-Daten)
-//  - onZurueck:  was passieren soll, wenn man "Zurück zur Karte" tippt
+        Spacer(modifier = Modifier.height(10.dp))
+
+        DuelStatusRow(
+            label = "Team Blau (Du)",
+            value = "2 Spots",
+            color = ActiveGreen
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        DuelStatusRow(
+            label = "Team Rot",
+            value = "1 Spot",
+            color = EnemyRed
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        DuelStatusRow(
+            label = "Nächster Spot",
+            value = "180 m",
+            color = SpotBlue
+        )
+    }
+}
+
+// Einzelne Statuszeile im Info-Panel
+@Composable
+fun DuelStatusRow(
+    label: String,
+    value: String,
+    color: Color
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Kleiner farbiger Punkt als Indikator
+        androidx.compose.foundation.Canvas(modifier = Modifier.size(9.dp)) {
+            drawCircle(color = color)
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Text(
+            text = label,
+            color = Color.White.copy(alpha = 0.55f),
+            fontSize = 12.sp
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Text(
+            text = value,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+// End-Screen (Leaderboard) mit Spielstand
 @Composable
 fun EndScreen(
     ergebnisse: List<Ergebnis>,
     onZurueck: () -> Unit
 ) {
-
-    // Liste nach Punkten sortieren: hoechste Punktzahl zuerst (Platz 1).
-    // sortedByDescending sortiert absteigend.
+    // Sortiert Ergebnisse absteigend nach Punkten (Platz 1 ganz oben)
     val sortiert = ergebnisse.sortedByDescending { it.punkte }
 
     Column(
@@ -237,8 +288,6 @@ fun EndScreen(
             .background(DarkBackground)
             .padding(20.dp)
     ) {
-
-        // Ueberschrift
         Text(
             text = "Duell beendet",
             color = Color.White,
@@ -256,9 +305,6 @@ fun EndScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Die Liste der Spieler.
-        // forEachIndexed laeuft durch jeden Eintrag UND gibt den Index mit (0,1,2,...).
-        // platz = index + 1, weil der Index bei 0 anfaengt, der Platz aber bei 1.
         sortiert.forEachIndexed { index, ergebnis ->
             ErgebnisZeile(
                 platz = index + 1,
@@ -268,10 +314,8 @@ fun EndScreen(
             Spacer(modifier = Modifier.height(10.dp))
         }
 
-        // weight(1f) auf einem leeren Spacer schiebt den Button nach ganz unten.
         Spacer(modifier = Modifier.weight(1f))
 
-        // Zurueck zur Karte
         Button(
             onClick = onZurueck,
             modifier = Modifier
@@ -289,7 +333,7 @@ fun EndScreen(
     }
 }
 
-// Eine einzelne Zeile der Ergebnisliste: [Platz]  Name ........ Punkte
+// Zeile im Endstand: [Platz.] [Name] [Punkte]
 @Composable
 fun ErgebnisZeile(
     platz: Int,
@@ -303,7 +347,6 @@ fun ErgebnisZeile(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Platznummer links
         Text(
             text = "$platz.",
             color = SpotBlue,
@@ -313,7 +356,6 @@ fun ErgebnisZeile(
 
         Spacer(modifier = Modifier.width(14.dp))
 
-        // Name in der Mitte
         Text(
             text = name,
             color = Color.White,
@@ -321,10 +363,8 @@ fun ErgebnisZeile(
             fontWeight = FontWeight.Bold
         )
 
-        // Spacer schiebt die Punkte nach rechts
         Spacer(modifier = Modifier.weight(1f))
 
-        // Punkte rechts
         Text(
             text = "$punkte Pkt",
             color = Color.White.copy(alpha = 0.8f),
@@ -333,18 +373,13 @@ fun ErgebnisZeile(
     }
 }
 
-
-
-// Preview zeigt den Startzustand (Idle) direkt in Android Studio.
-// Quelle: moco202612creatingcomposables.pdf — @Preview
+// Previews
 @Preview(showBackground = true)
 @Composable
 fun KarteScreenPreview() {
     KarteScreen()
 }
 
-// Zweite Preview: zeigt nur den End-Screen mit Beispiel-Daten,
-// damit man ihn in Android Studio sieht, ohne erst durchs Spiel zu klicken.
 @Preview(showBackground = true)
 @Composable
 fun EndScreenPreview() {

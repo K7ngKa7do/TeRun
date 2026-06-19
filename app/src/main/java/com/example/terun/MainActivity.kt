@@ -88,14 +88,9 @@ fun TeRunApp() {
             )
         }
 
-        // HomeScreen — Hauptscreen (kommt als nächstes)
+        // HomeScreen — Hauptscreen mit Karte
         composable<HomeRoute> {
-            // Platzhalter bis HomeScreen fertig ist
-            // Quelle: moco202612creatingcomposables.pdf — Text
-            androidx.compose.material3.Text(
-                text = "HomeScreen kommt bald",
-                color = androidx.compose.ui.graphics.Color.White
-            )
+            KarteScreen()
         }
     }
 }
