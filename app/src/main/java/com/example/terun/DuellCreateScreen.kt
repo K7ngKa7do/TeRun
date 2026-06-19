@@ -64,21 +64,13 @@ fun DuellCreateScreen(
             }
 
             // Button zum Starten des Duells
-            Button(
+            TeRunButton(
+                text = "+ Neues Duell starten",
                 onClick = onStartDuelClicked,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 12.dp)
-                    .height(52.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = TeRunBlue)
-            ) {
-                Text(
-                    text = "+ Neues Duell starten",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            )
         }
     }
 }

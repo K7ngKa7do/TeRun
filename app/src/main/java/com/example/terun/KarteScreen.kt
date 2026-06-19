@@ -1,19 +1,23 @@
 // Datei: KarteScreen.kt
 // Paket: com.example.terun
-// Quelle: moco202612creatingcomposables.pdf — Column, Row, Box, Scaffold, Button, Text
-// Quelle: moco202613composablesmodifier.pdf — Modifier-Verwendung (weight, padding, background, shape)
+// Quelle: moco202612creatingcomposables.pdf — Column, Row, Box, Scaffold, Button, Text, LazyColumn, Card
+// Quelle: moco202613composablesmodifier.pdf — Modifier-Verwendung (weight, padding, background, shape, verticalScroll)
 // Quelle: moco202614recompositionstates.pdf — Statusverwaltung mit remember und mutableStateOf
 // Quelle: moco202618mvvm.pdf — MVVM mit ViewModel zur Trennung von UI und Spiellogik
 
 package com.example.terun
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -21,19 +25,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 
-// Einfacher Platzhalter-Screen für Tabs, die noch in Arbeit sind
-@Composable
-fun PlatzhalterScreen(titel: String) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(text = titel, color = Color.White, fontSize = 18.sp)
-    }
-}
-
 // Haupt-Screen für den "Karte"-Tab. Verwaltet das Bottom-Menü und
-// delegiert die Anzeige je nach Zustand an Idle-Karte, Aktives Duell oder Endstand.
+// delegiert die Anzeige je nach Zustand an Karte, Duelle-Verwaltung, Rangliste oder Profil.
 @Composable
 fun KarteScreen(viewModel: KarteViewModel = viewModel()) {
     // Merkt sich den aktuell ausgewählten Tab in der Navigation Bar
@@ -113,45 +106,47 @@ fun KarteScreen(viewModel: KarteViewModel = viewModel()) {
 
                         // 3. Steuerungs-Button unter der Karte
                         if (!duellLaeuft) {
-                            Button(
-                                onClick = { viewModel.duellStarten() },
+                            TeRunButton(
+                                text = "+ Duell starten",
+                                onClick = {
+                                    val standardDuell = viewModel.duelle.firstOrNull() ?: Duell("1", "Default Duell", 3, 5)
+                                    viewModel.duellStarten(standardDuell)
+                                },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 14.dp, vertical = 12.dp)
-                                    .height(52.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = TeRunBlue)
-                            ) {
-                                Text(
-                                    text = "+ Neues Duell starten",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                            )
                         } else {
-                            Button(
+                            TeRunButton(
+                                text = "Aufgeben",
                                 onClick = { viewModel.duellBeenden() },
+                                isNegative = true,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 14.dp, vertical = 12.dp)
-                                    .height(52.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = AufgebenRot)
-                            ) {
-                                Text(
-                                    text = "Aufgeben",
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                            )
                         }
                     }
                 }
             }
-            Tab.DUELLE -> PlatzhalterScreen("Duelle\nIn Arbeit")
-            Tab.RANGLISTE -> PlatzhalterScreen("Rangliste\nIn Arbeit")
-            Tab.PROFIL -> PlatzhalterScreen("Profil\nIn Arbeit")
+            Tab.DUELLE -> {
+                Box(modifier = Modifier.padding(paddingValues)) {
+                    DuelleTabContent(
+                        viewModel = viewModel,
+                        onNavigateToKarte = { aktiverTab = Tab.KARTE }
+                    )
+                }
+            }
+            Tab.RANGLISTE -> {
+                Box(modifier = Modifier.padding(paddingValues)) {
+                    RanglisteTabContent(viewModel = viewModel)
+                }
+            }
+            Tab.PROFIL -> {
+                Box(modifier = Modifier.padding(paddingValues)) {
+                    ProfilTabContent(viewModel = viewModel)
+                }
+            }
         }
     }
 }
@@ -163,7 +158,7 @@ fun KarteTopBar(duellLaeuft: Boolean, verbleibendeZeit: Int = 300) {
         modifier = Modifier
             .fillMaxWidth()
             .height(52.dp)
-            .background(TopBarDark)
+            .background(DarkBackground)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -205,16 +200,11 @@ fun KarteTopBar(duellLaeuft: Boolean, verbleibendeZeit: Int = 300) {
 // Info-Panel-Card am unteren Rand der Karte während eines Duells
 @Composable
 fun BoxScope.DuelInfoPanel() {
-    Column(
+    GlassmorphicCard(
         modifier = Modifier
             .align(Alignment.BottomCenter)
             .padding(horizontal = 14.dp, vertical = 14.dp)
             .fillMaxWidth()
-            .background(
-                Color(0xFF0B1118).copy(alpha = 0.88f),
-                RoundedCornerShape(16.dp)
-            )
-            .padding(16.dp)
     ) {
         Text(
             text = "Aktives Duell",
@@ -327,20 +317,11 @@ fun EndScreen(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        Button(
+        TeRunButton(
+            text = "Zurück zur Karte",
             onClick = onZurueck,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = TeRunBlue)
-        ) {
-            Text(
-                text = "Zurück zur Karte",
-                color = Color.White,
-                fontWeight = FontWeight.Bold
-            )
-        }
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
@@ -381,6 +362,377 @@ fun ErgebnisZeile(
             color = Color.White.copy(alpha = 0.8f),
             fontSize = 15.sp
         )
+    }
+}
+
+// ============================================================================
+//  DUELLE-TAB — Dynamische Erstellung & Auswahl von Duellen
+// ============================================================================
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DuelleTabContent(
+    viewModel: KarteViewModel,
+    onNavigateToKarte: () -> Unit
+) {
+    var nameInput by remember { mutableStateOf("") }
+    var spotsInput by remember { mutableStateOf("3") }
+    var dauerInput by remember { mutableStateOf("5") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DarkBackground)
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text(
+            text = "Duell-Verwaltung",
+            color = Color.White,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Formular zum Anlegen eines neuen Duells
+        GlassmorphicCard(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = "Neues Duell anlegen",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            OutlinedTextField(
+                value = nameInput,
+                onValueChange = { nameInput = it },
+                label = { Text("Duell-Name", color = Color.White.copy(alpha = 0.5f)) },
+                placeholder = { Text("z.B. Campus-Runde") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = TeRunBlue,
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
+                )
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = spotsInput,
+                    onValueChange = { spotsInput = it },
+                    label = { Text("Spots (1-5)", color = Color.White.copy(alpha = 0.5f)) },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = TeRunBlue,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
+                    )
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                OutlinedTextField(
+                    value = dauerInput,
+                    onValueChange = { dauerInput = it },
+                    label = { Text("Dauer (Min)", color = Color.White.copy(alpha = 0.5f)) },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = TeRunBlue,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            TeRunButton(
+                text = "Duell anlegen",
+                onClick = {
+                    val spots = spotsInput.toIntOrNull() ?: 3
+                    val dauer = dauerInput.toIntOrNull() ?: 5
+                    if (nameInput.isNotBlank()) {
+                        viewModel.erstelleDuell(nameInput, spots, dauer)
+                        nameInput = ""
+                        spotsInput = "3"
+                        dauerInput = "5"
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text(
+            text = "Verfügbare Duelle",
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        viewModel.duelle.forEach { duell ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.07f)),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = duell.name,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                        Text(
+                            text = "${duell.spotsAnzahl} Spots | ${duell.zeitLimitMinuten} Min Limit",
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            viewModel.duellStarten(duell)
+                            onNavigateToKarte()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                        contentPadding = PaddingValues(),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(36.dp).width(80.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    brush = Brush.horizontalGradient(
+                                        colors = listOf(TeRunBlue, TeRunBlueLight)
+                                    ),
+                                    shape = RoundedCornerShape(8.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Starten", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+//  RANGLISTE-TAB — Dynamisch berechnete Leaderboards
+// ============================================================================
+@Composable
+fun RanglisteTabContent(viewModel: KarteViewModel) {
+    val rangliste = viewModel.holeRangliste()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DarkBackground)
+            .padding(16.dp)
+    ) {
+        Text(
+            text = "Rangliste",
+            color = Color.White,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+        ) {
+            rangliste.forEachIndexed { index, ergebnis ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .background(MapDark, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${index + 1}.",
+                        color = SpotBlue,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    Text(
+                        text = ergebnis.name,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    Text(
+                        text = "${ergebnis.punkte} Pkt",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 15.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+//  PROFIL-TAB — Dynamisches Profil mit Statistiken
+// ============================================================================
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProfilTabContent(viewModel: KarteViewModel) {
+    var editMode by remember { mutableStateOf(false) }
+    var nameInput by remember { mutableStateOf(viewModel.spielerName) }
+    var teamInput by remember { mutableStateOf(viewModel.teamName) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DarkBackground)
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text(
+            text = "Spielerprofil",
+            color = Color.White,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TeRunLogo(size = 80.dp)
+            Spacer(modifier = Modifier.width(16.dp))
+            Column {
+                if (editMode) {
+                    OutlinedTextField(
+                        value = nameInput,
+                        onValueChange = { nameInput = it },
+                        placeholder = { Text("Spielername") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = TeRunBlue,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = teamInput,
+                        onValueChange = { teamInput = it },
+                        placeholder = { Text("Teamname") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = TeRunBlue,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
+                        )
+                    )
+                } else {
+                    Text(
+                        text = viewModel.spielerName,
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Team: ${viewModel.teamName}",
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Statistiken-Karte
+        GlassmorphicCard(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = "Statistiken",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            StatRow(label = "Gesamte Ranglistenpunkte", value = "${viewModel.spielerGesamtPunkte} Pkt")
+            StatRow(label = "Zurückgelegte Distanz", value = "0.0 km")
+            StatRow(label = "Absolvierte Duelle", value = if (viewModel.spielerGesamtPunkte > 0) "1" else "0")
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Editier-Button
+        TeRunButton(
+            text = if (editMode) "Profil speichern" else "Profil bearbeiten",
+            onClick = {
+                if (editMode) {
+                    if (nameInput.isNotBlank()) viewModel.spielerName = nameInput
+                    if (teamInput.isNotBlank()) viewModel.teamName = teamInput
+                } else {
+                    nameInput = viewModel.spielerName
+                    teamInput = viewModel.teamName
+                }
+                editMode = !editMode
+            },
+            isPositiveAlternative = editMode,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+fun StatRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(text = label, color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+        Text(text = value, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
     }
 }
 

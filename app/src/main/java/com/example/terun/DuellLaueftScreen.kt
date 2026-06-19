@@ -69,22 +69,14 @@ fun DuellLaueftScreen(
             }
 
             // Aufgeben Button
-            Button(
+            TeRunButton(
+                text = "Aufgeben",
                 onClick = onGiveUpClicked,
+                isNegative = true,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 12.dp)
-                    .height(52.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = EnemyRed)
-            ) {
-                Text(
-                    text = "Aufgeben",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            )
         }
     }
 }
