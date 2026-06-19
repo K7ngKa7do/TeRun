@@ -67,8 +67,11 @@ fun KarteScreen(viewModel: KarteViewModel = viewModel()) {
                         // Zustand IDLE oder LAEUFT: Karte mit TopBar anzeigen
                         val duellLaeuft = (status == SpielStatus.LAEUFT)
 
-                        // 1. Obere Statusleiste
-                        KarteTopBar(duellLaeuft = duellLaeuft)
+                        // 1. Obere Statusleiste mit Countdown-Timer
+                        KarteTopBar(
+                            duellLaeuft = duellLaeuft,
+                            verbleibendeZeit = viewModel.verbleibendeZeit
+                        )
 
                         // 2. Kartenbereich (nimmt den restlichen freien Platz ein)
                         Box(
@@ -155,7 +158,7 @@ fun KarteScreen(viewModel: KarteViewModel = viewModel()) {
 
 // Obere Statusleiste des Karten-Bildschirms
 @Composable
-fun KarteTopBar(duellLaeuft: Boolean) {
+fun KarteTopBar(duellLaeuft: Boolean, verbleibendeZeit: Int = 300) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -164,8 +167,16 @@ fun KarteTopBar(duellLaeuft: Boolean) {
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Zeigt "Duell läuft (MM:SS)" oder den Standardnamen "TeRun"
         Text(
-            text = if (duellLaeuft) "Duell läuft" else "TeRun",
+            text = if (duellLaeuft) {
+                val mins = verbleibendeZeit / 60
+                val secs = verbleibendeZeit % 60
+                val timeString = String.format("%02d:%02d", mins, secs)
+                "Duell läuft ($timeString)"
+            } else {
+                "TeRun"
+            },
             color = Color.White,
             fontWeight = FontWeight.Bold
         )
