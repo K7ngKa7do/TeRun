@@ -1,0 +1,513 @@
+Perfekt. Wenn dein Teil für Meilenstein 3 die letzten Architektur-/Implementierungspunkte umfasst, würde ich die Dokumentation genau in dieser Reihenfolge aufbauen. So kannst du sie direkt als Bericht oder Präsentationsgrundlage verwenden.
+
+# Meilenstein 3 – Technische Umsetzung von TeRun
+
+**Bearbeitet von: Krishna Ketharasingam**
+
+---
+
+# 1. Einführung
+
+Im Rahmen von Meilenstein 3 wurde die technische Grundstruktur der Anwendung **TeRun (Territory Run)** entwickelt.
+
+Ziel war es, eine moderne Android-Anwendung zu entwerfen, die:
+
+* eine saubere Softwarearchitektur besitzt,
+* Daten strukturiert verwaltet,
+* zukünftige Erweiterungen ermöglicht,
+* sowie Hintergrundprozesse unterstützt.
+
+Für die Umsetzung wurde das **MVVM-Architekturmuster (Model – View – ViewModel)** in Kombination mit **Jetpack Compose** verwendet.
+
+---
+
+# 2. Architekturkonzept (MVVM)
+
+Für die Entwicklung wurde das MVVM-Muster eingesetzt.
+
+MVVM trennt die Anwendung in drei Hauptbereiche:
+
+## Model
+
+Enthält die Datenobjekte und Zustände der Anwendung.
+
+Beispiele:
+
+* Duell
+* Ergebnis
+* Spielstatus
+
+---
+
+## View
+
+Die Benutzeroberfläche.
+
+Beispiele:
+
+* LoginScreen
+* KarteScreen
+* DuellCreateScreen
+* DuellLaeuftScreen
+* DuellEndScreen
+
+---
+
+## ViewModel
+
+Verbindet Oberfläche und Datenmodell.
+
+Aufgaben:
+
+* Spiellogik
+* Datenverwaltung
+* Zustandsänderungen
+* Hintergrundprozesse
+
+---
+
+## Vorteile von MVVM
+
+* klare Trennung der Verantwortlichkeiten
+* bessere Wartbarkeit
+* einfachere Erweiterbarkeit
+* moderne Android-Architektur
+* bessere Testbarkeit
+
+---
+
+# 3. Projektstruktur
+
+Die Anwendung wurde in mehrere Pakete aufgeteilt.
+
+```text
+com.example.terun
+│
+├── model
+│   ├── Duell.kt
+│   ├── Ergebnis.kt
+│   └── SpielStatus.kt
+│
+├── repository
+│   └── SpielRepository.kt
+│
+├── viewmodel
+│   └── KarteViewModel.kt
+│
+└── ui
+    ├── LoginScreen.kt
+    ├── RegisterScreen.kt
+    ├── SignInScreen.kt
+    ├── KarteScreen.kt
+    ├── DuellCreateScreen.kt
+    ├── DuellLaeuftScreen.kt
+    └── DuellEndScreen.kt
+```
+
+Durch diese Struktur werden Datenhaltung, Logik und Benutzeroberfläche voneinander getrennt.
+
+---
+
+# 4. Einfache Implementierung des Models
+
+*(Meilenstein-3-Anforderung)*
+
+Die Anwendung enthält bereits eine einfache Implementierung des Datenmodells.
+
+Da sich das Projekt aktuell noch in der Entwicklungsphase befindet, werden die Daten zunächst lokal im Speicher verwaltet.
+
+Eine Datenbank oder Cloud-Anbindung ist zu diesem Zeitpunkt noch nicht erforderlich.
+
+---
+
+## Duell.kt
+
+Die Klasse „Duell“ beschreibt ein laufendes Spiel.
+
+Sie speichert beispielsweise:
+
+* Gegner
+* Punkte
+* Spiel-ID
+
+Beispiel:
+
+```kotlin
+data class Duell(
+    val id: Int,
+    val gegner: String,
+    val punkte: Int
+)
+```
+
+---
+
+## Ergebnis.kt
+
+Speichert abgeschlossene Spielergebnisse.
+
+Beispiel:
+
+```kotlin
+data class Ergebnis(
+    val spieler: String,
+    val punkte: Int
+)
+```
+
+Mögliche Verwendung:
+
+* Ranglisten
+* Spielhistorie
+* Statistiken
+
+---
+
+## SpielStatus.kt
+
+Beschreibt den aktuellen Zustand eines Spiels.
+
+Beispiel:
+
+```kotlin
+enum class SpielStatus {
+    WARTET,
+    LAEUFT,
+    BEENDET
+}
+```
+
+Mögliche Zustände:
+
+* wartet auf Start
+* läuft aktuell
+* beendet
+
+---
+
+## Bewertung
+
+Die Anforderungen des Meilensteins werden erfüllt, da:
+
+* Datenobjekte vorhanden sind
+* Spielzustände modelliert wurden
+* Daten von der Oberfläche getrennt gespeichert werden
+
+---
+
+# 5. Repository-Schicht
+
+Zwischen Datenmodell und ViewModel befindet sich das Repository.
+
+## SpielRepository.kt
+
+Das Repository dient als zentrale Datenquelle.
+
+Aufgaben:
+
+* Duelle speichern
+* Ergebnisse verwalten
+* Ranglisten bereitstellen
+* Daten an das ViewModel liefern
+
+Prinzip:
+
+```text
+ViewModel
+    ↓
+Repository
+    ↓
+Model
+```
+
+Aktuell werden die Daten lokal gespeichert.
+
+Später könnte das Repository erweitert werden um:
+
+* Firebase
+* REST-API
+* Room Database
+
+Dadurch muss die übrige Anwendung nicht verändert werden.
+
+---
+
+# 6. ViewModel-Schicht
+
+## KarteViewModel.kt
+
+Das ViewModel bildet die zentrale Steuerung der Anwendung.
+
+Hier befindet sich die Spiellogik.
+
+Aufgaben:
+
+* Duelle starten
+* Punktestand verwalten
+* Spielstatus ändern
+* Ranglisten aktualisieren
+* UI-Zustände steuern
+
+---
+
+## State Management
+
+Jetpack Compose arbeitet mit States.
+
+Beispiel:
+
+```kotlin
+var punkte by mutableIntStateOf(0)
+```
+
+Wenn sich der Wert ändert:
+
+```kotlin
+punkte++
+```
+
+aktualisiert Compose automatisch die Oberfläche.
+
+Dieses Verhalten wird als **Recomposition** bezeichnet.
+
+---
+
+# 7. Benutzeroberfläche mit Jetpack Compose
+
+Die gesamte Anwendung wurde mit Jetpack Compose entwickelt.
+
+Compose ermöglicht die deklarative Erstellung moderner Android-Oberflächen.
+
+---
+
+## LoginScreen
+
+Funktionen:
+
+* Anmeldung
+* Navigation
+
+---
+
+## RegisterScreen
+
+Funktionen:
+
+* Registrierung neuer Nutzer
+* Eingabe persönlicher Daten
+
+---
+
+## SignInScreen
+
+Alternative Login-Maske.
+
+---
+
+## KarteScreen
+
+Hauptbildschirm der Anwendung.
+
+Darstellung:
+
+* Spielkarte
+* Territorien
+* Spielinformationen
+
+---
+
+## DuellCreateScreen
+
+Erstellen eines neuen Duells.
+
+Mögliche Funktionen:
+
+* Gegner auswählen
+* Duell starten
+
+---
+
+## DuellLaeuftScreen
+
+Anzeige eines aktiven Duells.
+
+Elemente:
+
+* Punktestand
+* Timer
+* Spielstatus
+
+---
+
+## DuellEndScreen
+
+Zeigt:
+
+* Gewinner
+* Endpunktzahl
+* Spielergebnis
+
+---
+
+# 8. Konzept für Nebenläufigkeit und Background Operations
+
+*(Meilenstein-3-Anforderung)*
+
+Moderne Android-Anwendungen führen viele Aufgaben im Hintergrund aus.
+
+Dadurch bleibt die Benutzeroberfläche jederzeit flüssig und reaktionsfähig.
+
+---
+
+## Warum wird Nebenläufigkeit benötigt?
+
+In TeRun gibt es Prozesse, die unabhängig von der Benutzeroberfläche laufen sollen.
+
+Beispiele:
+
+* Duell-Timer
+* automatische Punktberechnung
+* GPS-Ortung
+* Serverkommunikation
+* Datenabgleich
+
+Diese Aufgaben dürfen die Oberfläche nicht blockieren.
+
+---
+
+## Eingesetzte Technologie
+
+Für Hintergrundprozesse wird das Kotlin-Coroutines-Konzept verwendet.
+
+Beispiel:
+
+```kotlin
+viewModelScope.launch {
+    delay(1000)
+}
+```
+
+---
+
+## Rolle des ViewModels
+
+Das ViewModel verwaltet diese Prozesse.
+
+Dadurch bleiben:
+
+* UI
+* Datenhaltung
+* Hintergrundprozesse
+
+sauber voneinander getrennt.
+
+---
+
+## Geplante Anwendung in TeRun
+
+### Timer
+
+Während eines Duells läuft ein Countdown im Hintergrund.
+
+---
+
+### GPS
+
+Standortdaten werden regelmäßig aktualisiert.
+
+---
+
+### Netzwerkkommunikation
+
+Spielstände werden mit einem Server synchronisiert.
+
+---
+
+### Punktberechnung
+
+Automatische Aktualisierung der Spielergebnisse.
+
+---
+
+## Konzeptdarstellung
+
+```text
+Main Thread
+│
+├─ Benutzeroberfläche
+├─ Navigation
+└─ Benutzereingaben
+
+Background Operations
+│
+├─ Timer
+├─ GPS
+├─ Netzwerk
+└─ Datenverarbeitung
+```
+
+---
+
+# 9. Datenfluss innerhalb der Anwendung
+
+Der Datenfluss folgt dem MVVM-Prinzip.
+
+```text
+Benutzer
+   ↓
+View
+   ↓
+ViewModel
+   ↓
+Repository
+   ↓
+Model
+```
+
+Änderungen laufen anschließend zurück:
+
+```text
+Model
+   ↓
+Repository
+   ↓
+ViewModel
+   ↓
+UI Update
+```
+
+Dadurch bleibt die Anwendung übersichtlich und wartbar.
+
+---
+
+# 10. Erweiterungsmöglichkeiten
+
+Die Architektur wurde bewusst so gestaltet, dass zukünftige Funktionen leicht ergänzt werden können.
+
+Geplante Erweiterungen:
+
+* Google Maps Integration
+* GPS-Tracking
+* Firebase Backend
+* Online-Duelle
+* Live-Ranglisten
+* Push-Benachrichtigungen
+* Echtzeit-Synchronisation
+
+---
+
+# 11. Fazit
+
+Für Meilenstein 3 wurde eine moderne Android-Architektur auf Basis von **MVVM** und **Jetpack Compose** umgesetzt.
+
+Die Anforderungen:
+
+✅ einfache Implementierung des Models
+
+✅ Konzept für Nebenläufigkeit und Background Operations
+
+wurden erfüllt.
+
+Durch die Trennung in Model, Repository, ViewModel und Benutzeroberfläche ist die Anwendung bereits jetzt modular aufgebaut und kann in zukünftigen Meilensteinen problemlos erweitert werden.
+
+Das ist die Version, die ich auch tatsächlich in die Abgabe bzw. Doku übernehmen würde, weil sie die Meilenstein-3-Kriterien direkt adressiert und gleichzeitig zeigt, dass ihr die Vorlesungsthemen (MVVM, State Management, Recomposition, Coroutines) verstanden habt.
