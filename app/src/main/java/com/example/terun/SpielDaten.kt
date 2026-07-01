@@ -1,35 +1,18 @@
-// Datei: SpielDaten.kt
-// Paket: com.example.terun
-// Quelle: moco202618mvvm.pdf — Model-Datenstruktur im MVVM-Muster
-
 package com.example.terun
 
-// Spielzustand: bestimmt, welcher Zustand auf der Karte sichtbar ist.
-enum class SpielStatus {
-    IDLE,
-    LAEUFT,
-    BEENDET
-}
+enum class SpielStatus { IDLE, LAEUFT, BEENDET }
 
-// Repräsentiert ein erstelltes Duell
 data class Duell(
     val id: String,
     val name: String,
     val spotsAnzahl: Int,
-    val zeitLimitMinuten: Int
+    val zeitLimitMinuten: Int,
+    val spot1Lat: Double = 50.9355, val spot1Lng: Double = 6.9860,
+    val spot2Lat: Double = 50.9340, val spot2Lng: Double = 6.9840,
+    val spot3Lat: Double = 50.9360, val spot3Lng: Double = 6.9845,
+    val spot4Lat: Double = 50.9350, val spot4Lng: Double = 6.9850,
+    val spot5Lat: Double = 50.9365, val spot5Lng: Double = 6.9835,
+    val gegner: String = ""
 )
 
-// Ein einzelnes Ergebnis eines Spielers am Ende eines Duells.
-data class Ergebnis(
-    val name: String,
-    val punkte: Int
-)
-
-// Beispiel-Daten für Previews
-fun beispielErgebnisse(): List<Ergebnis> {
-    return listOf(
-        Ergebnis(name = "Du", punkte = 1200),
-        Ergebnis(name = "Lena", punkte = 980),
-        Ergebnis(name = "Max", punkte = 640)
-    )
-}
+data class Ergebnis(val name: String, val punkte: Int)

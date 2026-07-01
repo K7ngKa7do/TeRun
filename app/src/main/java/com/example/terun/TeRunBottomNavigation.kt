@@ -1,19 +1,24 @@
 // Datei: TeRunBottomNavigation.kt
 // Paket: com.example.terun
-// Quelle: moco202612creatingcomposables.pdf — NavigationBar, NavigationBarItem
-// Quelle: moco202616navigation.pdf — Navigation unter Verwendung von Events (Callbacks)
+// Quelle: moco202612creatingcomposables.pdf — NavigationBar, NavigationBarItem und Icon-Verwendung
 
 package com.example.terun
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 
-// Enum für die vier Hauptbereiche der App
-enum class Tab { KARTE, DUELLE, RANGLISTE, PROFIL }
+// Enum für die drei Hauptbereiche der App
+enum class Tab { KARTE, DUELLE, PROFIL }
 
-// Wiederverwendbare Bottom Navigation Bar, die den aktiven Tab hervorhebt
+// Wiederverwendbare Bottom Navigation Bar mit Standard Material Design Icons zur robusten Darstellung
 @Composable
 fun TeRunBottomNavigation(
     aktiverTab: Tab = Tab.KARTE,
@@ -25,28 +30,21 @@ fun TeRunBottomNavigation(
         NavigationBarItem(
             selected = aktiverTab == Tab.KARTE,
             onClick = { onTabClick(Tab.KARTE) },
-            icon = { Text("⌖") },
+            icon = { Icon(Icons.Default.LocationOn, contentDescription = "Karte") },
             label = { Text("Karte") }
         )
 
         NavigationBarItem(
             selected = aktiverTab == Tab.DUELLE,
             onClick = { onTabClick(Tab.DUELLE) },
-            icon = { Text("⚔") },
+            icon = { Icon(Icons.Default.List, contentDescription = "Duelle") },
             label = { Text("Duelle") }
-        )
-
-        NavigationBarItem(
-            selected = aktiverTab == Tab.RANGLISTE,
-            onClick = { onTabClick(Tab.RANGLISTE) },
-            icon = { Text("★") },
-            label = { Text("Rangliste") }
         )
 
         NavigationBarItem(
             selected = aktiverTab == Tab.PROFIL,
             onClick = { onTabClick(Tab.PROFIL) },
-            icon = { Text("●") },
+            icon = { Icon(Icons.Default.Person, contentDescription = "Profil") },
             label = { Text("Profil") }
         )
     }

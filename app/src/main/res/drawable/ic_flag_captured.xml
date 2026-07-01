@@ -1,0 +1,23 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="36dp"
+    android:height="36dp"
+    android:viewportWidth="36"
+    android:viewportHeight="36">
+  <!-- Outer circle background glow -->
+  <path
+      android:pathData="M18,18m-16,0a16,16 0,1 1,32 0a16,16 0,1 1,-32 0"
+      android:fillColor="#1A00E676" />
+  <!-- Circular border -->
+  <path
+      android:pathData="M18,18m-12,0a12,12 0,1 1,24 0a12,12 0,1 1,-24 0"
+      android:fillColor="#00C853"
+      android:strokeColor="#FFFFFF"
+      android:strokeWidth="1.5"/>
+  <!-- Inner Flag icon path -->
+  <path
+      android:pathData="M14,10 L22,10 L19,13 L22,16 L14,16 L14,24"
+      android:strokeColor="#FFFFFF"
+      android:strokeWidth="2"
+      android:strokeLineJoin="round"
+      android:strokeLineCap="round"/>
+</vector>

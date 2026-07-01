@@ -9,33 +9,46 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material.icons.filled.Lock
+import kotlinx.coroutines.launch
+
 @Composable
 fun SignInScreen(
+    repository: SpielRepository,
     onSignInClicked: () -> Unit,      // Wird aufgerufen wenn Anmelden erfolgreich
     onRegisterClicked: () -> Unit     // Wird aufgerufen wenn "Jetzt registrieren" geklickt
 ) {
-    // Box füllt den ganzen Bildschirm mit dunklem Hintergrund
-    // Quelle: moco202613composablesmodifier.pdf — fillMaxSize, background
+    val coroutineScope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val emailFocusRequester = remember { FocusRequester() }
+    val passwordFocusRequester = remember { FocusRequester() }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(DarkBackground)
     ) {
-        // Column stapelt alle Elemente untereinander
-        // Quelle: moco202612creatingcomposables.pdf — Column
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -43,9 +56,6 @@ fun SignInScreen(
                 .fillMaxSize()
                 .padding(horizontal = 44.dp)
         ) {
-
-            // Kleines Logo oben
-            // Quelle: moco202613composablesmodifier.pdf — size, clip, background
             TeRunLogo(size = 100.dp)
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -58,8 +68,6 @@ fun SignInScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            // Begrüßungstext
-            // Quelle: moco202612creatingcomposables.pdf — Text
             Text(
                 text = "Willkommen zurück",
                 fontSize = 18.sp,
@@ -77,18 +85,13 @@ fun SignInScreen(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            // State für E-Mail Eingabe
-            // Quelle: moco202614recompositionstates.pdf — remember, mutableStateOf
-            var email by remember { mutableStateOf("") }
-
-            // State für Passwort Eingabe
-            var password by remember { mutableStateOf("") }
-
             // E-Mail Eingabefeld
-            // Externe Quelle: developer.android.com/develop/ui/compose/text/user-input
             OutlinedTextField(
                 value = email,
-                onValueChange = { email = it },
+                onValueChange = { 
+                    email = it
+                    errorMessage = null 
+                },
                 placeholder = {
                     Text(
                         text = "E-Mail",
@@ -103,8 +106,9 @@ fun SignInScreen(
                         tint = Color.White.copy(alpha = 0.3f)
                     )
                 },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(onNext = { passwordFocusRequester.requestFocus() }),
+                modifier = Modifier.fillMaxWidth().focusRequester(emailFocusRequester),
                 shape = RoundedCornerShape(10.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = TeRunBlue,
@@ -120,10 +124,12 @@ fun SignInScreen(
             Spacer(modifier = Modifier.height(10.dp))
 
             // Passwort Eingabefeld
-            // Externe Quelle: developer.android.com/develop/ui/compose/text/user-input
             OutlinedTextField(
                 value = password,
-                onValueChange = { password = it },
+                onValueChange = { 
+                    password = it
+                    errorMessage = null 
+                },
                 placeholder = {
                     Text(
                         text = "Passwort",
@@ -139,8 +145,9 @@ fun SignInScreen(
                     )
                 },
                 visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                modifier = Modifier.fillMaxWidth().focusRequester(passwordFocusRequester),
                 shape = RoundedCornerShape(10.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = TeRunBlue,
@@ -155,23 +162,42 @@ fun SignInScreen(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Passwort vergessen Link
-            // Quelle: moco202613composablesmodifier.pdf — clickable
-            Text(
-                text = "Passwort vergessen?",
-                fontSize = 11.sp,
-                color = TeRunBlue,
-                modifier = Modifier
-                    .align(Alignment.End)
-                    .clickable { }
-            )
+            // Rote Fehlermeldung
+            if (errorMessage != null) {
+                Text(
+                    text = errorMessage!!,
+                    color = Color.Red,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .padding(vertical = 4.dp)
+                        .align(Alignment.Start)
+                )
+            }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             // Anmelden Button
-            // Quelle: moco202612creatingcomposables.pdf — Button
             Button(
-                onClick = onSignInClicked,
+                onClick = {
+                    errorMessage = null
+                    if (email.isBlank() || password.isBlank()) {
+                        errorMessage = "Bitte E-Mail und Passwort eingeben!"
+                        return@Button
+                    }
+                    coroutineScope.launch {
+                        val user = repository.holeBenutzer(email.trim())
+                        if (user == null) {
+                            errorMessage = "E-Mail nicht registriert!"
+                        } else if (user.passwort != password) {
+                            errorMessage = "Falsches Passwort!"
+                        } else {
+                            // Erfolg: Aktiven Benutzernamen für das Profil und Bestenliste setzen
+                            repository.speichereSpielerName(user.name)
+                            onSignInClicked()
+                        }
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
@@ -190,9 +216,6 @@ fun SignInScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Hinweis für neue Nutzer
-            // Quelle: moco202612creatingcomposables.pdf — Text
-            // Quelle: moco202613composablesmodifier.pdf — clickable
             Row {
                 Text(
                     text = "Noch kein Konto? ",
@@ -210,11 +233,11 @@ fun SignInScreen(
     }
 }
 
-// Quelle: moco202612creatingcomposables.pdf — @Preview
 @Preview(showBackground = true)
 @Composable
 fun SignInScreenPreview() {
     SignInScreen(
+        repository = SpielRepository(LocalContext.current),
         onSignInClicked = {},
         onRegisterClicked = {}
     )
