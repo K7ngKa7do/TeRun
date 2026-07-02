@@ -1,112 +1,164 @@
 package com.example.terun
 
 import android.content.Context
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * SpielRepository — Datenschicht der App.
+ * Kapselt den gesamten Datenzugriff: Room-Datenbank (DAO) und SharedPreferences (PreferencesManager).
+ * Das ViewModel kennt nur das Repository, nie direkt DAO oder Prefs.
+ */
 class SpielRepository(context: Context) {
 
-    private val dao = TeRunDatabase.getDatabase(context).teRunDao()
-    private val prefs = PreferencesManager(context)
+    private val dao = TeRunDatabase.getDatabase(context).teRunDao() // Datenbankzugriffsobjekt
+    private val prefs = PreferencesManager(context)                 // SharedPreferences-Wrapper
 
-    // Profil (SharedPreferences)
-    fun ladeSpielerName(): String = prefs.getSpielerName()
-    fun speichereSpielerName(name: String) = prefs.saveSpielerName(name)
-    fun ladeTeamName(): String = prefs.getTeamName()
-    fun speichereTeamName(name: String) = prefs.saveTeamName(name)
-    fun ladeGesamtPunkte(): Int = prefs.getSpielerGesamtPunkte()
-    fun speichereGesamtPunkte(punkte: Int) = prefs.saveSpielerGesamtPunkte(punkte)
+    // ==========================================================================
+    // Account
+    // ==========================================================================
+
+    // Account-Key = E-Mail-Adresse des eingeloggten Nutzers; wird beim Login gesetzt
+    fun setAccountKey(email: String) = prefs.saveAccountKey(email)
+    fun getAccountKey(): String = prefs.getAccountKey()
+
+    // ==========================================================================
+    // Profil
+    // ==========================================================================
+
+    // Anzeigenamen des aktuell eingeloggten Spielers laden
+    // Fallback: E-Mail-Präfix (z.B. "max" aus "max@mail.de") wenn kein Name gesetzt
+    fun ladeSpielerName(): String {
+        val key = prefs.getAccountKey()
+        return if (key.isBlank()) "Spieler" else prefs.getDisplayName(key, key.substringBefore("@"))
+    }
+
+    // Anzeigenamen in SharedPreferences und Room-DB aktualisieren
+    fun speichereSpielerName(name: String) {
+        val key = prefs.getAccountKey()
+        if (key.isNotBlank()) {
+            prefs.saveDisplayName(key, name)
+            // DB-Update im IO-Thread (Fire-and-Forget, kein Rückgabewert benötigt)
+            CoroutineScope(Dispatchers.IO).launch {
+                dao.updateBenutzerName(key, name)
+            }
+        }
+    }
+
     fun ladeGesamtDistanz(): Double = prefs.getSpielerGesamtDistanz()
     fun speichereGesamtDistanz(distanz: Double) = prefs.saveSpielerGesamtDistanz(distanz)
+
     fun ladeAbsolvierteDuelleCount(): Int = prefs.getAbsolvierteDuelleCount()
     fun speichereAbsolvierteDuelleCount(count: Int) = prefs.saveAbsolvierteDuelleCount(count)
 
+    // ==========================================================================
     // Duelle
+    // ==========================================================================
+
+    // Alle gespeicherten Duelle aus der Room-DB laden und als Domain-Objekte zurückgeben
     suspend fun holeDuelle(): List<Duell> = withContext(Dispatchers.IO) {
-        val entities = dao.getAlleDuelle()
-        if (entities.isEmpty()) {
-            val standardDuelle = listOf(
-                DuellEntity("1", "Campus Deutz Sprint", 3, 5,
-                    50.9355, 6.9860, 50.9340, 6.9840, 50.9360, 6.9845, 50.9350, 6.9850, 50.9365, 6.9835),
-                DuellEntity("2", "Stadtpark Runde", 3, 10,
-                    50.9380, 6.9900, 50.9390, 6.9880, 50.9370, 6.9920, 50.9385, 6.9910, 50.9375, 6.9895),
-                DuellEntity("3", "Rheinpromenade", 3, 8,
-                    50.9365, 6.9740, 50.9350, 6.9725, 50.9380, 6.9750, 50.9370, 6.9730, 50.9360, 6.9745)
-            )
-            dao.insertDuelle(standardDuelle)
-            return@withContext standardDuelle.map { it.toDuell() }
-        }
-        entities.map { it.toDuell() }
+        dao.getAlleDuelle().map { it.toDuell() } // Entity → Domain-Objekt
     }
 
+    // Duell als neue Zeile in die Room-DB schreiben
     suspend fun speichereDuell(duell: Duell) = withContext(Dispatchers.IO) {
-        dao.insertDuell(DuellEntity(
-            id = duell.id, name = duell.name,
-            spotsAnzahl = duell.spotsAnzahl, zeitLimitMinuten = duell.zeitLimitMinuten,
-            spot1Lat = duell.spot1Lat, spot1Lng = duell.spot1Lng,
-            spot2Lat = duell.spot2Lat, spot2Lng = duell.spot2Lng,
-            spot3Lat = duell.spot3Lat, spot3Lng = duell.spot3Lng,
-            spot4Lat = duell.spot4Lat, spot4Lng = duell.spot4Lng,
-            spot5Lat = duell.spot5Lat, spot5Lng = duell.spot5Lng,
-            gegner = duell.gegner
-        ))
+        dao.insertDuell(
+            DuellEntity(
+                id = duell.id,
+                name = duell.name,
+                spotsAnzahl = duell.spotsAnzahl,
+                zeitLimitMinuten = duell.zeitLimitMinuten,
+                spot1Lat = duell.spot1Lat, spot1Lng = duell.spot1Lng,
+                spot2Lat = duell.spot2Lat, spot2Lng = duell.spot2Lng,
+                spot3Lat = duell.spot3Lat, spot3Lng = duell.spot3Lng,
+                spot4Lat = duell.spot4Lat, spot4Lng = duell.spot4Lng,
+                spot5Lat = duell.spot5Lat, spot5Lng = duell.spot5Lng,
+                gegner = duell.gegner
+            )
+        )
     }
 
+    // Duell anhand seiner ID aus der Room-DB löschen
     suspend fun loescheDuell(duell: Duell) = withContext(Dispatchers.IO) {
         dao.deleteDuellById(duell.id)
     }
 
-    // Ergebnisse / Rangliste
-    suspend fun holeRangliste(): List<Ergebnis> = withContext(Dispatchers.IO) {
-        val liste = dao.getAlleErgebnisse().map { Ergebnis(it.name, it.punkte) }.toMutableList()
-        val spielerName = ladeSpielerName()
-        if (liste.none { it.name == spielerName }) liste.add(Ergebnis(spielerName, ladeGesamtPunkte()))
-        liste.sortedByDescending { it.punkte }
-    }
-
-    suspend fun speichereErgebnis(name: String, punkte: Int) = withContext(Dispatchers.IO) {
-        dao.insertErgebnis(ErgebnisEntity(name = name, punkte = punkte))
-    }
-
+    // ==========================================================================
     // Benutzer
+    // ==========================================================================
+
+    // Benutzer anhand der E-Mail laden (z.B. für Login-Validierung)
     suspend fun holeBenutzer(email: String): BenutzerEntity? = withContext(Dispatchers.IO) {
         dao.getBenutzerByEmail(email)
     }
 
+    // Neuen Benutzer in der Room-DB anlegen (bei Registrierung)
     suspend fun speichereBenutzer(benutzer: BenutzerEntity) = withContext(Dispatchers.IO) {
         dao.insertBenutzer(benutzer)
     }
 
+    // Prüft ob ein Benutzername bereits vergeben ist (für Eindeutigkeits-Validierung bei Registrierung)
+    suspend fun existiertBenutzerMitName(name: String): Boolean = withContext(Dispatchers.IO) {
+        dao.getBenutzerByName(name) != null
+    }
+
+    // Sucht Benutzernamen die den eingegebenen Begriff enthalten (für Autocomplete bei Gegner-/Freundessuche)
+    suspend fun sucheBenutzerNamen(query: String): List<String> = withContext(Dispatchers.IO) {
+        dao.sucheBenutzerNamen(query)
+    }
+
+    // Konto vollständig löschen: Benutzer-Zeile + alle Freundschafts-Einträge entfernen
+    suspend fun loescheKonto(email: String) = withContext(Dispatchers.IO) {
+        dao.deleteBenutzerByEmail(email)
+        dao.deleteFreundeByEmail(email)
+    }
+
+    // ==========================================================================
     // Freunde
-    suspend fun holeFreunde(): List<String> = withContext(Dispatchers.IO) {
-        dao.getAlleFreunde().map { it.name }
+    // ==========================================================================
+
+    // Alle Freunde des Spielers laden und deren Anzeigenamen zurückgeben
+    // Freundschaften sind in der DB beidseitig gespeichert (ownerEmail ↔ friendEmail)
+    suspend fun holeFreunde(ownerEmail: String): List<String> = withContext(Dispatchers.IO) {
+        dao.getFreundeByOwner(ownerEmail).mapNotNull { friend ->
+            // friendEmail → Anzeigename über DB-Lookup auflösen
+            dao.getBenutzerByEmail(friend.friendEmail)?.name
+        }
     }
 
-    suspend fun fuegeFreundHinzu(name: String): Boolean = withContext(Dispatchers.IO) {
-        if (dao.getBenutzerByName(name) != null) {
-            dao.insertFreund(FreundEntity(name))
+    // Freund anhand des Anzeigenamens hinzufügen; gibt false zurück wenn User nicht gefunden
+    // Freundschaft wird beidseitig eingetragen: A sieht B und B sieht A
+    suspend fun fuegeFreundHinzu(ownerEmail: String, friendName: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val friendUser = dao.getBenutzerByName(friendName) ?: return@withContext false
+            val friendEmail = friendUser.email
+            if (ownerEmail == friendEmail) return@withContext false // Sich selbst hinzufügen verhindern
+            dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail))
+            dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = ownerEmail))
             true
-        } else false
+        }
+
+    // Freundschaft beidseitig löschen
+    suspend fun loescheFreund(ownerEmail: String, friendName: String) = withContext(Dispatchers.IO) {
+        val friendUser = dao.getBenutzerByName(friendName) ?: return@withContext
+        val friendEmail = friendUser.email
+        dao.deleteFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail))
+        dao.deleteFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = ownerEmail))
     }
 
-    suspend fun loescheFreund(name: String) = withContext(Dispatchers.IO) {
-        dao.deleteFreund(FreundEntity(name))
-    }
+    // ==========================================================================
+    // Mapper (privat)
+    // ==========================================================================
 
-    suspend fun prepopulateBenutzer() = withContext(Dispatchers.IO) {
-        listOf(
-            BenutzerEntity("spieler1@terun.de", "Spieler1", "Passwort123."),
-            BenutzerEntity("user1@terun.de", "UserOne", "Passwort123."),
-            BenutzerEntity("user2@terun.de", "UserTwo", "Passwort123."),
-            BenutzerEntity("user3@terun.de", "UserThree", "Passwort123."),
-            BenutzerEntity("user4@terun.de", "UserFour", "Passwort123."),
-            BenutzerEntity("user5@terun.de", "UserFive", "Passwort123.")
-        ).forEach { if (dao.getBenutzerByEmail(it.email) == null) dao.insertBenutzer(it) }
-    }
-
+    // Konvertiert eine Room-Entity (DuellEntity) in ein Domain-Objekt (Duell)
+    // Trennung: DB-Schicht kennt nur Entities, ViewModel/UI nur Domain-Objekte
     private fun DuellEntity.toDuell() = Duell(
-        id = id, name = name,
-        spotsAnzahl = spotsAnzahl, zeitLimitMinuten = zeitLimitMinuten,
+        id = id,
+        name = name,
+        spotsAnzahl = spotsAnzahl,
+        zeitLimitMinuten = zeitLimitMinuten,
         spot1Lat = spot1Lat, spot1Lng = spot1Lng,
         spot2Lat = spot2Lat, spot2Lng = spot2Lng,
         spot3Lat = spot3Lat, spot3Lng = spot3Lng,

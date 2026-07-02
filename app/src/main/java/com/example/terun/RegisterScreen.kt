@@ -290,8 +290,8 @@ fun RegisterScreen(
                                 passwort = password
                             )
                             repository.speichereBenutzer(newUser)
-                            
-                            // Aktiven Namen für preferences setzen
+                            // Account-Key setzen und Display-Name initialisieren
+                            repository.setAccountKey(newUser.email)
                             repository.speichereSpielerName(newUser.name)
                             Toast.makeText(context, "Konto erfolgreich erstellt!", Toast.LENGTH_SHORT).show()
                             onRegisterClicked()

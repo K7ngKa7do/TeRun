@@ -192,8 +192,12 @@ fun SignInScreen(
                         } else if (user.passwort != password) {
                             errorMessage = "Falsches Passwort!"
                         } else {
-                            // Erfolg: Aktiven Benutzernamen für das Profil und Bestenliste setzen
-                            repository.speichereSpielerName(user.name)
+                            // Erfolg: Email als stabilen Account-Key setzen
+                            repository.setAccountKey(user.email)
+                            // Display-Name nur beim ersten Login setzen (Standard = DB-Name)
+                            if (repository.ladeSpielerName().isBlank() || repository.ladeSpielerName() == "Spieler") {
+                                repository.speichereSpielerName(user.name)
+                            }
                             onSignInClicked()
                         }
                     }

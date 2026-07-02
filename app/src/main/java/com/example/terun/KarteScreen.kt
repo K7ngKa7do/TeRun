@@ -17,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -59,6 +60,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 
 // Haupt-Screen für den "Karte"-Tab.
 @Composable
@@ -187,33 +192,36 @@ fun KarteScreen(
                                     }
                                     mapView.overlays.add(compass)
 
-                                    val currentPos = viewModel.spielerPosition ?: GeoPoint(50.9348, 6.9852)
-                                    
-                                    // Nur zentrieren, wenn der Benutzer die Ansicht nicht manuell verschoben hat
-                                    if (!hasCenteredMap) {
-                                        mapView.controller.setCenter(currentPos)
+                                    val gpsPos = viewModel.spielerPosition
+                                    if (gpsPos != null && !hasCenteredMap) {
+                                        mapView.controller.setCenter(gpsPos)
                                         hasCenteredMap = true
+                                    } else if (gpsPos == null && !hasCenteredMap) {
+                                        mapView.controller.setCenter(GeoPoint(50.9348, 6.9852))
                                     }
+
+                                    val currentPos = gpsPos ?: GeoPoint(50.9348, 6.9852)
 
                                     // 1. Eigener Spieler-Marker auf der Karte
                                     val playerMarker = Marker(mapView).apply {
                                         position = currentPos
                                         title = viewModel.spielerName
-                                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                                        icon = createUserLocationDot(context)
+                                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                                     }
                                     mapView.overlays.add(playerMarker)
 
-                                    // 2. Ziel-Beacon (Startpunkt des Duells)
-                                    val finishPos = viewModel.startPositionGeo ?: GeoPoint(50.9348, 6.9852)
-                                    val finishMarker = Marker(mapView).apply {
-                                        position = finishPos
-                                        title = "Ziel-Beacon (Startort)"
-                                        icon = ContextCompat.getDrawable(context, android.R.drawable.ic_menu_myplaces)
-                                    }
-                                    mapView.overlays.add(finishMarker)
-
                                     val active = viewModel.aktivesDuell
                                     if (duellLaeuft && active != null) {
+                                        // 2. Ziel-Beacon (Startpunkt des Duells)
+                                        val finishPos = viewModel.startPositionGeo ?: GeoPoint(50.9348, 6.9852)
+                                        val finishMarker = Marker(mapView).apply {
+                                            position = finishPos
+                                            title = "Ziel-Beacon (Startort)"
+                                            icon = ContextCompat.getDrawable(context, android.R.drawable.ic_menu_myplaces)
+                                        }
+                                        mapView.overlays.add(finishMarker)
+
                                         val count = active.spotsAnzahl
                                         // 3. Spots mit sich farblich ändernden Icons zeichnen
                                         if (count >= 1) {
@@ -292,10 +300,14 @@ fun KarteScreen(
                                         }
 
                                         val routePolyline = Polyline().apply {
-                                            addPoint(currentPos)
-                                            addPoint(nextSpotGeo)
-                                            outlinePaint.color = android.graphics.Color.BLUE
-                                            outlinePaint.strokeWidth = 6f
+                                            if (viewModel.routePoints.isNotEmpty()) {
+                                                setPoints(viewModel.routePoints)
+                                            } else {
+                                                setPoints(listOf(currentPos, nextSpotGeo))
+                                            }
+                                            outlinePaint.color = android.graphics.Color.parseColor("#0088FF")
+                                            outlinePaint.strokeWidth = 8f
+                                            outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(15f, 15f), 0f)
                                         }
                                         mapView.overlays.add(routePolyline)
                                     }
@@ -350,9 +362,7 @@ fun KarteScreen(
                                 }
                             }
 
-                            if (duellLaeuft) {
-                                DuelInfoPanel(viewModel)
-                            }
+
                         }
 
                         if (!duellLaeuft) {
@@ -377,7 +387,7 @@ fun KarteScreen(
                         } else {
                             TeRunButton(
                                 text = "Aufgeben",
-                                onClick = { viewModel.duellBeenden(success = false) },
+                                onClick = { viewModel.duellBeenden(success = false, aufgegeben = true) },
                                 isNegative = true,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -472,129 +482,7 @@ fun KarteScreen(
     }
 }
 
-// Info-Panel-Card mit solidem, dunklem Hintergrund (nicht transparent) für perfekte Lesbarkeit auf der hellen Karte
-@Composable
-fun BoxScope.DuelInfoPanel(viewModel: KarteViewModel = viewModel()) {
-    val active = viewModel.aktivesDuell
-    val currentPos = viewModel.spielerPosition
-    val count = active?.spotsAnzahl ?: 3
-    val allCaptured = active != null && (1..count).all { idx ->
-        when (idx) {
-            1 -> viewModel.spot1Captured
-            2 -> viewModel.spot2Captured
-            3 -> viewModel.spot3Captured
-            4 -> viewModel.spot4Captured
-            5 -> viewModel.spot5Captured
-            else -> true
-        }
-    }
-    val distanzText = if (active != null && currentPos != null) {
-        val targetLat: Double
-        val targetLng: Double
-        when {
-            count >= 1 && !viewModel.spot1Captured -> { targetLat = active.spot1Lat; targetLng = active.spot1Lng }
-            count >= 2 && !viewModel.spot2Captured -> { targetLat = active.spot2Lat; targetLng = active.spot2Lng }
-            count >= 3 && !viewModel.spot3Captured -> { targetLat = active.spot3Lat; targetLng = active.spot3Lng }
-            count >= 4 && !viewModel.spot4Captured -> { targetLat = active.spot4Lat; targetLng = active.spot4Lng }
-            count >= 5 && !viewModel.spot5Captured -> { targetLat = active.spot5Lat; targetLng = active.spot5Lng }
-            else -> {
-                val finishPos = viewModel.startPositionGeo ?: GeoPoint(50.9348, 6.9852)
-                targetLat = finishPos.latitude
-                targetLng = finishPos.longitude
-            }
-        }
-        val dist = calculateDistance(currentPos.latitude, currentPos.longitude, targetLat, targetLng)
-        String.format("%.0f m", dist)
-    } else {
-        "---"
-    }
 
-    Card(
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .padding(horizontal = 14.dp, vertical = 14.dp)
-            .fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = DarkBackground.copy(alpha = 0.93f)),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Aktives Duell",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            val cap = (if (viewModel.spot1Captured) 1 else 0) +
-                      (if (viewModel.spot2Captured) 1 else 0) +
-                      (if (viewModel.spot3Captured) 1 else 0) +
-                      (if (viewModel.spot4Captured) 1 else 0) +
-                      (if (viewModel.spot5Captured) 1 else 0)
-            DuelStatusRow(
-                label = "Team Blau (Du)",
-                value = "$cap / $count Spots",
-                color = ActiveGreen
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            DuelStatusRow(
-                label = "Nächstes Ziel",
-                value = if (allCaptured) "Ziel-Beacon" else "Nächster Spot",
-                color = SpotBlue
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            DuelStatusRow(
-                label = "Distanz verbleibend",
-                value = distanzText,
-                color = SpotOrange
-            )
-        }
-    }
-}
-
-@Composable
-fun DuelStatusRow(
-    label: String,
-    value: String,
-    color: Color
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Canvas(modifier = Modifier.size(9.dp)) {
-            drawCircle(color = color)
-        }
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        Text(
-            text = label,
-            color = Color.White.copy(alpha = 0.55f),
-            fontSize = 12.sp
-        )
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        Text(
-            text = value,
-            color = Color.White,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold
-        )
-    }
-}
 
 // End-Screen
 @Composable
@@ -602,7 +490,12 @@ fun EndScreen(
     ergebnisse: List<Ergebnis>,
     onZurueck: () -> Unit
 ) {
-    val sortiert = ergebnisse.sortedByDescending { it.punkte }
+    // Sortiert nach: nicht aufgegeben zuerst, dann nach Anzahl der eroberten Spots absteigend
+    val sortiert = ergebnisse.sortedWith(
+        compareBy<Ergebnis> { it.aufgegeben }
+            .thenByDescending { it.spots }
+    )
+    val winner = sortiert.firstOrNull { !it.aufgegeben } ?: sortiert.firstOrNull()
 
     Column(
         modifier = Modifier
@@ -620,23 +513,80 @@ fun EndScreen(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = "Endstand",
+            text = "Ergebnis",
             color = Color.White.copy(alpha = 0.6f),
             fontSize = 14.sp
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        sortiert.forEachIndexed { index, ergebnis ->
-            ErgebnisZeile(
-                platz = index + 1,
-                name = ergebnis.name,
-                punkte = ergebnis.punkte
-            )
-            Spacer(modifier = Modifier.height(10.dp))
+        // Große Winner Card
+        if (winner != null) {
+            val announcement = if (winner.aufgegeben) {
+                "Kein Gewinner (alle aufgegeben)"
+            } else {
+                "${winner.name} gewinnt!"
+            }
+
+            GlassmorphicCard(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Gewinner",
+                        color = SpotOrange,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = announcement,
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (!winner.aufgegeben) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "${winner.spots} Spots erreicht",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "Platzierungen:",
+            color = Color.White.copy(alpha = 0.8f),
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            itemsIndexed(sortiert) { index, ergebnis ->
+                ErgebnisZeile(
+                    platz = index + 1,
+                    name = ergebnis.name,
+                    spots = ergebnis.spots,
+                    aufgegeben = ergebnis.aufgegeben
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         TeRunButton(
             text = "Zurück zur Karte",
@@ -650,7 +600,8 @@ fun EndScreen(
 fun ErgebnisZeile(
     platz: Int,
     name: String,
-    punkte: Int
+    spots: Int,
+    aufgegeben: Boolean
 ) {
     Row(
         modifier = Modifier
@@ -678,9 +629,10 @@ fun ErgebnisZeile(
         Spacer(modifier = Modifier.weight(1f))
 
         Text(
-            text = "$punkte Pkt",
-            color = Color.White.copy(alpha = 0.8f),
-            fontSize = 15.sp
+            text = if (aufgegeben) "Aufgegeben" else "$spots Spots",
+            color = if (aufgegeben) Color.Red.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.8f),
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold
         )
     }
 }
@@ -691,10 +643,13 @@ fun DuellErstellenScreen(
     onDismiss: () -> Unit,
     onSave: (name: String, zeitLimitMinuten: Int, spots: List<GeoPoint>, gegner: String) -> Unit,
     spielerPosition: GeoPoint,
-    friends: List<String>
+    currentUserName: String,
+    searchUsers: suspend (String) -> List<String>
 ) {
     var nameInput by remember { mutableStateOf("") }
-    var gegnerInput by remember { mutableStateOf("") }
+    var gegnerSearchQuery by remember { mutableStateOf("") }
+    val selectedGegner = remember { mutableStateListOf<String>() }
+    val gegnerSuggestions = remember { mutableStateListOf<String>() }
     var stundenInput by remember { mutableStateOf("0") }
     var minutenInput by remember { mutableStateOf("15") }
     
@@ -720,6 +675,21 @@ fun DuellErstellenScreen(
             isSearching = false
         } else {
             dynamicSuggestions.clear()
+        }
+    }
+
+    // Gegner-Live-Abfrage (Autocomplete aus Datenbank)
+    LaunchedEffect(gegnerSearchQuery) {
+        val query = gegnerSearchQuery.trim()
+        if (query.isNotEmpty()) {
+            val matches = searchUsers(query)
+            gegnerSuggestions.clear()
+            // Exclude current user and already selected opponents
+            gegnerSuggestions.addAll(
+                matches.filter { it != currentUserName && !selectedGegner.contains(it) }
+            )
+        } else {
+            gegnerSuggestions.clear()
         }
     }
 
@@ -764,12 +734,12 @@ fun DuellErstellenScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // 1b. Gegner (Team oder User) hinzufügen
+                // 1b. Gegner hinzufügen (bis zu 6 Benutzer)
                 OutlinedTextField(
-                    value = gegnerInput,
-                    onValueChange = { gegnerInput = it },
-                    label = { Text("Gegner (Team- oder Username)", color = Color.White.copy(alpha = 0.5f)) },
-                    placeholder = { Text("z.B. UserTwo oder Team Rot") },
+                    value = gegnerSearchQuery,
+                    onValueChange = { gegnerSearchQuery = it },
+                    label = { Text("Gegner suchen & hinzufügen (maximal 6)", color = Color.White.copy(alpha = 0.5f)) },
+                    placeholder = { Text("Benutzername eintippen...") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -780,33 +750,75 @@ fun DuellErstellenScreen(
                     )
                 )
 
-                if (friends.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Schnellauswahl aus Freunden:",
-                        color = Color.White.copy(alpha = 0.6f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                // Autocomplete-Vorschläge
+                if (gegnerSuggestions.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.12f)),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                        shape = RoundedCornerShape(8.dp)
                     ) {
-                        friends.forEach { friend ->
-                            AssistChip(
-                                onClick = { gegnerInput = friend },
-                                label = { Text(friend, color = Color.White) },
-                                colors = AssistChipDefaults.assistChipColors(
-                                    containerColor = Color.White.copy(alpha = 0.08f)
-                                ),
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-                            )
+                        Column {
+                            gegnerSuggestions.forEach { suggestion ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            if (selectedGegner.size >= 6) {
+                                                Toast.makeText(context, "Maximal 6 Gegner erlaubt!", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                selectedGegner.add(suggestion)
+                                                gegnerSearchQuery = ""
+                                            }
+                                        }
+                                        .padding(12.dp)
+                                ) {
+                                    Text(text = suggestion, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                // Ausgewählte Gegner anzeigen
+                if (selectedGegner.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Ausgewählte Gegner (${selectedGegner.size}/6):",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        selectedGegner.forEach { name ->
+                            Row(
+                                modifier = Modifier
+                                    .background(TeRunBlue.copy(alpha = 0.18f), shape = RoundedCornerShape(16.dp))
+                                    .border(1.dp, TeRunBlue.copy(alpha = 0.4f), shape = RoundedCornerShape(16.dp))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(name, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Entfernen",
+                                    tint = Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .clickable { selectedGegner.remove(name) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+
 
                 // 2. Zeitbegrenzung (Stunden und Minuten)
                 Text(
@@ -819,10 +831,19 @@ fun DuellErstellenScreen(
                 Row(modifier = Modifier.fillMaxWidth()) {
                     OutlinedTextField(
                         value = stundenInput,
-                        onValueChange = { stundenInput = it },
+                        onValueChange = { newVal ->
+                            val filtered = newVal.filter { it.isDigit() }
+                            if (filtered.length <= 2) {
+                                val num = filtered.toIntOrNull()
+                                if (num == null || num <= 24) {
+                                    stundenInput = filtered
+                                }
+                            }
+                        },
                         label = { Text("Stunden", color = Color.White.copy(alpha = 0.5f)) },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(8.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
@@ -833,10 +854,19 @@ fun DuellErstellenScreen(
                     Spacer(modifier = Modifier.width(10.dp))
                     OutlinedTextField(
                         value = minutenInput,
-                        onValueChange = { minutenInput = it },
+                        onValueChange = { newVal ->
+                            val filtered = newVal.filter { it.isDigit() }
+                            if (filtered.length <= 2) {
+                                val num = filtered.toIntOrNull()
+                                if (num == null || num <= 60) {
+                                    minutenInput = filtered
+                                }
+                            }
+                        },
                         label = { Text("Minuten", color = Color.White.copy(alpha = 0.5f)) },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(8.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
@@ -1036,7 +1066,8 @@ fun DuellErstellenScreen(
                                         val playerMarker = org.osmdroid.views.overlay.Marker(map).apply {
                                             position = spielerPosition
                                             title = "Deine Position"
-                                            setAnchor(org.osmdroid.views.overlay.Marker.ANCHOR_CENTER, org.osmdroid.views.overlay.Marker.ANCHOR_BOTTOM)
+                                            icon = createUserLocationDot(context)
+                                            setAnchor(org.osmdroid.views.overlay.Marker.ANCHOR_CENTER, org.osmdroid.views.overlay.Marker.ANCHOR_CENTER)
                                         }
                                         map.overlays.add(playerMarker)
 
@@ -1230,14 +1261,27 @@ fun DuellErstellenScreen(
             Button(
                 onClick = {
                     val hours = stundenInput.toIntOrNull() ?: 0
-                    val minutes = minutenInput.toIntOrNull() ?: 15
+                    val minutes = minutenInput.toIntOrNull() ?: 0
                     val totalMinutes = hours * 60 + minutes
                     
-                    if (nameInput.isNotBlank() && addedSpots.isNotEmpty()) {
-                        onSave(nameInput, totalMinutes, addedSpots.map { it.second }, gegnerInput.trim())
-                    } else {
-                        Toast.makeText(context, "Bitte einen Namen eingeben und mindestens einen Spot hinzufügen!", Toast.LENGTH_LONG).show()
+                    if (nameInput.isBlank()) {
+                        Toast.makeText(context, "Bitte einen Duell-Namen eingeben!", Toast.LENGTH_LONG).show()
+                        return@Button
                     }
+                    if (totalMinutes <= 0) {
+                        Toast.makeText(context, "Die Dauer muss mindestens 1 Minute sein!", Toast.LENGTH_LONG).show()
+                        return@Button
+                    }
+                    if (selectedGegner.isEmpty()) {
+                        Toast.makeText(context, "Bitte mindestens einen Gegner hinzufügen!", Toast.LENGTH_LONG).show()
+                        return@Button
+                    }
+                    if (addedSpots.isEmpty()) {
+                        Toast.makeText(context, "Bitte mindestens einen Spot hinzufügen!", Toast.LENGTH_LONG).show()
+                        return@Button
+                    }
+
+                    onSave(nameInput, totalMinutes, addedSpots.map { it.second }, selectedGegner.joinToString(", "))
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = TeRunBlue),
                 shape = RoundedCornerShape(12.dp),
@@ -1304,8 +1348,9 @@ fun DuelleTabContent(
                 viewModel.erstelleDuell(name, totalMinutes, spots, gegner)
                 showCreateDuelScreen = false
             },
-            spielerPosition = viewModel.spielerPosition ?: GeoPoint(50.9348, 6.9852),
-            friends = viewModel.freunde
+            spielerPosition = viewModel.spielerPosition ?: GeoPoint(0.0, 0.0),
+            currentUserName = viewModel.spielerName,
+            searchUsers = { viewModel.sucheBenutzerNamen(it) }
         )
     } else {
         Column(
@@ -1426,7 +1471,7 @@ fun ProfilTabContent(
 ) {
     var editMode by remember { mutableStateOf(false) }
     var nameInput by remember { mutableStateOf(viewModel.spielerName) }
-    var teamInput by remember { mutableStateOf(viewModel.teamName) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
 
     var notificationsEnabled by remember { mutableStateOf(true) }
     val context = LocalContext.current
@@ -1459,20 +1504,6 @@ fun ProfilTabContent(
                             unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
                         )
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = teamInput,
-                        onValueChange = { teamInput = it },
-                        placeholder = { Text("Teamname") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = TeRunBlue,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
-                        )
-                    )
                 } else {
                     Text(
                         text = viewModel.spielerName,
@@ -1480,34 +1511,12 @@ fun ProfilTabContent(
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = "Team: ${viewModel.teamName}",
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 14.sp
-                    )
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        GlassmorphicCard(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = "Statistiken",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-
-            StatRow(label = "Gesamte Ranglistenpunkte", value = "${viewModel.spielerGesamtPunkte} Pkt")
-            StatRow(label = "Zurückgelegte Distanz", value = String.format(java.util.Locale.US, "%.2f km", viewModel.spielerGesamtDistanz))
-            StatRow(label = "Absolvierte Duelle", value = viewModel.absolvierteDuelleCount.toString())
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
 
         // Einstellungs-Bereich
         GlassmorphicCard(
@@ -1554,14 +1563,50 @@ fun ProfilTabContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
-                        viewModel.loescheProfil()
-                        Toast.makeText(context, "Spielerprofil gelöscht!", Toast.LENGTH_SHORT).show()
-                        onLogout()
+                        showDeleteConfirmation = true
                     }
                     .padding(vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                if (showDeleteConfirmation) {
+                    AlertDialog(
+                        onDismissRequest = { showDeleteConfirmation = false },
+                        title = {
+                            Text(
+                                text = "Konto löschen?",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
+                        },
+                        text = {
+                            Text(
+                                text = "Sind Sie sicher, dass Sie Ihr Konto löschen wollen? Diese Aktion kann nicht rückgängig gemacht werden.",
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    showDeleteConfirmation = false
+                                    viewModel.loescheProfil {
+                                        Toast.makeText(context, "Konto erfolgreich gelöscht!", Toast.LENGTH_SHORT).show()
+                                        onLogout()
+                                    }
+                                }
+                            ) {
+                                Text("Löschen", color = Color.Red, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showDeleteConfirmation = false }) {
+                                Text("Abbrechen", color = Color.White.copy(alpha = 0.6f))
+                            }
+                        },
+                        containerColor = DarkBackground,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                }
                 Text(
                     text = "Profil löschen",
                     color = Color.Red.copy(alpha = 0.85f),
@@ -1695,10 +1740,8 @@ fun ProfilTabContent(
             onClick = {
                 if (editMode) {
                     if (nameInput.isNotBlank()) viewModel.spielerName = nameInput
-                    if (teamInput.isNotBlank()) viewModel.teamName = teamInput
                 } else {
                     nameInput = viewModel.spielerName
-                    teamInput = viewModel.teamName
                 }
                 editMode = !editMode
             },
@@ -1708,18 +1751,6 @@ fun ProfilTabContent(
     }
 }
 
-@Composable
-fun StatRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(text = label, color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
-        Text(text = value, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-    }
-}
 
 // Haversine Distanz-Berechnung
 private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -1747,9 +1778,10 @@ fun KarteTopBar(duellLaeuft: Boolean, viewModel: KarteViewModel = viewModel()) {
     ) {
         Text(
             text = if (duellLaeuft) {
-                val mins = viewModel.verbleibendeZeit / 60
-                val secs = viewModel.verbleibendeZeit % 60
-                val timeString = String.format("%02d:%02d", mins, secs)
+                val hours = viewModel.verbleibendeZeit / 3600
+                val minutes = (viewModel.verbleibendeZeit % 3600) / 60
+                val seconds = viewModel.verbleibendeZeit % 60
+                val timeString = String.format("%02d:%02d:%02d", hours, minutes, seconds)
                 "Duell läuft ($timeString)"
             } else {
                 "TeRun"
@@ -1758,35 +1790,27 @@ fun KarteTopBar(duellLaeuft: Boolean, viewModel: KarteViewModel = viewModel()) {
             fontWeight = FontWeight.Bold,
             fontSize = 16.sp
         )
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        Box(
-            modifier = Modifier
-                .background(
-                    color = if (duellLaeuft) BadgeGruen else Color.White.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(50.dp)
-                )
-                .padding(horizontal = 12.dp, vertical = 6.dp)
-        ) {
-            val capturedText = if (duellLaeuft && viewModel.aktivesDuell != null) {
-                val active = viewModel.aktivesDuell!!
-                val count = active.spotsAnzahl
-                val cap = (if (viewModel.spot1Captured) 1 else 0) +
-                          (if (viewModel.spot2Captured) 1 else 0) +
-                          (if (viewModel.spot3Captured) 1 else 0) +
-                          (if (viewModel.spot4Captured) 1 else 0) +
-                          (if (viewModel.spot5Captured) 1 else 0)
-                "$cap / $count Spots"
-            } else {
-                "Kein Duell aktiv"
-            }
-            Text(
-                text = capturedText,
-                color = Color.White,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
     }
+}
+
+fun createUserLocationDot(context: Context): android.graphics.drawable.Drawable {
+    val density = context.resources.displayMetrics.density
+    val size = (24 * density).toInt()
+    val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+    // Outer light blue semi-transparent glow/circle (Google Maps style)
+    paint.color = android.graphics.Color.parseColor("#440088FF")
+    canvas.drawCircle(size / 2f, size / 2f, 11 * density, paint)
+
+    // White outline circle
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawCircle(size / 2f, size / 2f, 7.5f * density, paint)
+
+    // Central solid blue dot
+    paint.color = android.graphics.Color.parseColor("#0088FF")
+    canvas.drawCircle(size / 2f, size / 2f, 5.5f * density, paint)
+
+    return android.graphics.drawable.BitmapDrawable(context.resources, bitmap)
 }

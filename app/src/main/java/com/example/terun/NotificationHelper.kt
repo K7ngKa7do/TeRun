@@ -1,54 +1,54 @@
-// Datei: NotificationHelper.kt
-// Paket: com.example.terun
-// Quelle: moco202641notifications.pdf — NotificationManager, NotificationChannel und NotificationCompat-Builder
-
 package com.example.terun
 
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import android.annotation.SuppressLint
 
+/**
+ * NotificationHelper — Sendet lokale Push-Benachrichtigungen.
+ * Wird verwendet um den Spieler über erreichte Spots oder Duell-Ergebnisse zu informieren,
+ * auch wenn die App gerade im Hintergrund läuft.
+ */
 class NotificationHelper(private val context: Context) {
 
-    private val channelId = "terun_notifications"
-    private val channelName = "TeRun Spiel-Benachrichtigungen"
-    private val notificationId = 1001
+    private val channelId = "terun_notifications"                   // Eindeutige Kanal-ID (fest vergeben)
+    private val channelName = "TeRun Spiel-Benachrichtigungen"      // Anzeigename in den Systemeinstellungen
+    private val notificationId = 1001                               // ID der Benachrichtigung (überschreibt vorherige)
 
+    // Kanal beim Erstellen des Helpers sofort anlegen
     init {
         createNotificationChannel()
     }
 
+    // NotificationChannel anlegen (ab Android 8.0 / API 26 erforderlich)
+    // Ohne Channel werden Benachrichtigungen auf neueren Geräten nicht angezeigt
     private fun createNotificationChannel() {
-        // NotificationChannels sind ab Android 8.0 (API 26) erforderlich
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val importance = NotificationManager.IMPORTANCE_DEFAULT
-            val channel = NotificationChannel(channelId, channelName, importance).apply {
+            val channel = NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_DEFAULT).apply {
                 description = "Benachrichtigungen für abgeschlossene Duelle oder erreichte Spots"
             }
-            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
         }
     }
 
+    // Benachrichtigung mit Titel und Nachrichtentext senden
+    // @SuppressLint: Berechtigung POST_NOTIFICATIONS wird im Manifest deklariert
     @SuppressLint("MissingPermission")
     fun sendNotification(title: String, message: String) {
-        val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info) // Nutzt das System-Info-Icon als Fallback
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.ic_dialog_info) // System-Fallback-Icon
             .setContentTitle(title)
             .setContentText(message)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setAutoCancel(true)
-
+            .setAutoCancel(true) // Benachrichtigung verschwindet nach Antippen
+            .build()
         try {
-            with(NotificationManagerCompat.from(context)) {
-                notify(notificationId, builder.build())
-            }
-        } catch (e: SecurityException) {
-            // Permission POST_NOTIFICATIONS fehlt unter Android 13+
-        }
+            NotificationManagerCompat.from(context).notify(notificationId, notification)
+        } catch (_: SecurityException) {} // Berechtigung fehlt unter Android 13+ → ignorieren
     }
 }

@@ -1,27 +1,28 @@
-// Datei: DuellEntity.kt
-// Paket: com.example.terun
-// Quelle: moco202634entities.pdf — Definition einer Entity-Klasse in Room
-
 package com.example.terun
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+/**
+ * DuellEntity — Room-Entity für gespeicherte Duelle.
+ * Tabelle: "duelle"
+ * Spiegelt das Domain-Objekt Duell 1:1 wider; wird über SpielRepository in Duell konvertiert.
+ */
 @Entity(tableName = "duelle")
 data class DuellEntity(
-    @PrimaryKey val id: String,
-    val name: String,
-    val spotsAnzahl: Int,
-    val zeitLimitMinuten: Int,
-    val spot1Lat: Double,
-    val spot1Lng: Double,
-    val spot2Lat: Double,
-    val spot2Lng: Double,
-    val spot3Lat: Double,
-    val spot3Lng: Double,
-    val spot4Lat: Double,
-    val spot4Lng: Double,
-    val spot5Lat: Double,
-    val spot5Lng: Double,
-    val gegner: String = ""
+    @PrimaryKey val id: String,      // UUID des Duells
+    val name: String,                // Bezeichnung
+    val spotsAnzahl: Int,            // Anzahl aktiver Spots (1–5)
+    val zeitLimitMinuten: Int,       // Zeitlimit in Minuten
+    val spot1Lat: Double,            // Spot 1 — Breitengrad
+    val spot1Lng: Double,            // Spot 1 — Längengrad
+    val spot2Lat: Double,            // Spot 2 — Breitengrad
+    val spot2Lng: Double,            // Spot 2 — Längengrad
+    val spot3Lat: Double,            // Spot 3 — Breitengrad
+    val spot3Lng: Double,            // Spot 3 — Längengrad
+    val spot4Lat: Double,            // Spot 4 — Breitengrad
+    val spot4Lng: Double,            // Spot 4 — Längengrad
+    val spot5Lat: Double,            // Spot 5 — Breitengrad
+    val spot5Lng: Double,            // Spot 5 — Längengrad
+    val gegner: String = ""          // Kommaseparierte Anzeigenamen der Gegner (leer = kein Gegner)
 )

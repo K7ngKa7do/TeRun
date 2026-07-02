@@ -32,7 +32,6 @@ class MainActivity : ComponentActivity() {
 fun TeRunApp() {
     val context = LocalContext.current
     val repository = remember { SpielRepository(context) }
-    LaunchedEffect(Unit) { repository.prepopulateBenutzer() }
 
     val navController = rememberNavController()
     NavHost(navController = navController, startDestination = LoginRoute) {
