@@ -684,6 +684,40 @@ class SpielRepository(private val context: Context) {
         }
     }
 
+    // Übersetzt technische Firebase-Fehlermeldungen in benutzerfreundliche deutsche Texte
+    fun translateAuthError(exception: Throwable?): String {
+        val msg = exception?.message ?: ""
+        return when {
+            msg.contains("API key not valid", ignoreCase = true) ||
+            msg.contains("Please pass a valid API key", ignoreCase = true) -> {
+                "Falsche E-Mail/Passwort oder Benutzer noch nicht registriert!"
+            }
+            msg.contains("no user record", ignoreCase = true) ||
+            msg.contains("user-not-found", ignoreCase = true) -> {
+                "Benutzer noch nicht registriert oder falsche E-Mail!"
+            }
+            msg.contains("wrong-password", ignoreCase = true) ||
+            msg.contains("password is invalid", ignoreCase = true) -> {
+                "Falsches Passwort!"
+            }
+            msg.contains("invalid-email", ignoreCase = true) ||
+            msg.contains("email address is badly formatted", ignoreCase = true) -> {
+                "Ungültiges E-Mail-Format!"
+            }
+            msg.contains("email already in use", ignoreCase = true) ||
+            msg.contains("email-already-in-use", ignoreCase = true) -> {
+                "Diese E-Mail-Adresse wird bereits verwendet!"
+            }
+            msg.contains("network-request-failed", ignoreCase = true) ||
+            msg.contains("network error", ignoreCase = true) -> {
+                "Netzwerkfehler! Bitte überprüfe deine Internetverbindung."
+            }
+            else -> {
+                "Falsche E-Mail/Passwort oder Benutzer noch nicht registriert!"
+            }
+        }
+    }
+
     // ==========================================================================
     // Mapper (privat)
     // ==========================================================================

@@ -287,7 +287,7 @@ fun RegisterScreen(
                             Toast.makeText(context, "Konto erfolgreich erstellt!", Toast.LENGTH_SHORT).show()
                             onRegisterClicked()
                         } else {
-                            errorMessage = result.exceptionOrNull()?.message ?: "Registrierung fehlgeschlagen!"
+                            errorMessage = repository.translateAuthError(result.exceptionOrNull())
                         }
                     }
                 },
