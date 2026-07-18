@@ -1878,12 +1878,24 @@ fun ProfilTabContent(
                         } else if (viewModel.freunde.contains(inputTrimmed)) {
                             Toast.makeText(context, "Bereits in der Freundesliste!", Toast.LENGTH_SHORT).show()
                         } else {
-                            viewModel.fuegeFreundHinzu(inputTrimmed) { success ->
-                                if (success) {
-                                    Toast.makeText(context, "Freundschaftsanfrage gesendet!", Toast.LENGTH_SHORT).show()
-                                    friendNameInput = ""
-                                } else {
-                                    Toast.makeText(context, "Spieler nicht gefunden", Toast.LENGTH_SHORT).show()
+                            viewModel.fuegeFreundHinzu(inputTrimmed) { result ->
+                                when (result) {
+                                    "SUCCESS" -> {
+                                        Toast.makeText(context, "Freundschaftsanfrage gesendet!", Toast.LENGTH_SHORT).show()
+                                        friendNameInput = ""
+                                    }
+                                    "ALREADY_SENT" -> {
+                                        Toast.makeText(context, "Freundschaftsanfrage bereits geschickt!", Toast.LENGTH_SHORT).show()
+                                    }
+                                    "ALREADY_FRIENDS" -> {
+                                        Toast.makeText(context, "Ihr seid bereits befreundet!", Toast.LENGTH_SHORT).show()
+                                    }
+                                    "SELF_REQUEST" -> {
+                                        Toast.makeText(context, "Du kannst dich nicht selbst hinzufügen!", Toast.LENGTH_SHORT).show()
+                                    }
+                                    else -> {
+                                        Toast.makeText(context, "Spieler nicht gefunden", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         }

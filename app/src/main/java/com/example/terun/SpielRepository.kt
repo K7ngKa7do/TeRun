@@ -543,7 +543,7 @@ class SpielRepository(private val context: Context) {
     }
 
     // Freundschaftsanfrage senden
-    suspend fun fuegeFreundHinzu(ownerEmail: String, friendName: String): Boolean =
+    suspend fun fuegeFreundHinzu(ownerEmail: String, friendName: String): String =
         withContext(Dispatchers.IO) {
             var friendUser = dao.getBenutzerByName(friendName)
             if (friendUser == null && networkMonitor.isOnline.value) {
@@ -573,10 +573,56 @@ class SpielRepository(private val context: Context) {
                 }
             }
 
+<<<<<<< HEAD
             // Smart-Cast-sicheren Zugriff auf friendUser erzwingen
             val resolvedFriend = friendUser ?: return@withContext false
             val friendEmail = resolvedFriend.email
             if (ownerEmail == friendEmail) return@withContext false
+=======
+            if (friendUser == null) return@withContext "USER_NOT_FOUND"
+            val friendEmail = friendUser.email
+            if (ownerEmail == friendEmail) return@withContext "SELF_REQUEST"
+
+            // 1. Lokale DB auf existierende Verbindung prüfen
+            val lokaleFreundschaft = dao.getFreundschaft(ownerEmail, friendEmail)
+            if (lokaleFreundschaft != null) {
+                return@withContext if (lokaleFreundschaft.status == "ACCEPTED") {
+                    "ALREADY_FRIENDS"
+                } else {
+                    "ALREADY_SENT"
+                }
+            }
+
+            // 2. Firestore auf existierende Verbindung prüfen (falls online)
+            if (networkMonitor.isOnline.value) {
+                try {
+                    val firestoreRequest = suspendCancellableCoroutine<String?> { continuation ->
+                        firestore.collection("friend_requests")
+                            .document("${ownerEmail}_$friendEmail")
+                            .get()
+                            .addOnCompleteListener { task ->
+                                if (task.isSuccessful && task.result != null && task.result.exists()) {
+                                    continuation.resume(task.result.getString("status"))
+                                } else {
+                                    continuation.resume(null)
+                                }
+                            }
+                    }
+                    if (firestoreRequest != null) {
+                        return@withContext if (firestoreRequest == "ACCEPTED") {
+                            dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
+                            dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = ownerEmail, status = "ACCEPTED"))
+                            "ALREADY_FRIENDS"
+                        } else {
+                            dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "PENDING"))
+                            "ALREADY_SENT"
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+>>>>>>> fa46e4070c4f87a2a24c034715166cfa82994dac
 
             // Lokalen Eintrag als PENDING speichern
             dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "PENDING"))
@@ -604,7 +650,7 @@ class SpielRepository(private val context: Context) {
                     e.printStackTrace()
                 }
             }
-            true
+            "SUCCESS"
         }
 
     // Holt ausstehende Freundschaftsanfragen für den angemeldeten Benutzer
@@ -744,6 +790,87 @@ class SpielRepository(private val context: Context) {
             firestore.collection("duel_sessions").document(duelId).delete()
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    // Übersetzt technische Firebase-Fehlermeldungen in benutzerfreundliche deutsche Texte
+    fun translateAuthError(exception: Throwable?): String {
+        val msg = exception?.message ?: ""
+        return when {
+            msg.contains("API key not valid", ignoreCase = true) ||
+            msg.contains("Please pass a valid API key", ignoreCase = true) -> {
+                "Falsche E-Mail/Passwort oder Benutzer noch nicht registriert!"
+            }
+            msg.contains("no user record", ignoreCase = true) ||
+            msg.contains("user-not-found", ignoreCase = true) -> {
+                "Benutzer noch nicht registriert oder falsche E-Mail!"
+            }
+            msg.contains("wrong-password", ignoreCase = true) ||
+            msg.contains("password is invalid", ignoreCase = true) -> {
+                "Falsches Passwort!"
+            }
+            msg.contains("invalid-email", ignoreCase = true) ||
+            msg.contains("email address is badly formatted", ignoreCase = true) -> {
+                "Ungültiges E-Mail-Format!"
+            }
+            msg.contains("email already in use", ignoreCase = true) ||
+            msg.contains("email-already-in-use", ignoreCase = true) -> {
+                "Diese E-Mail-Adresse wird bereits verwendet!"
+            }
+            msg.contains("network-request-failed", ignoreCase = true) ||
+            msg.contains("network error", ignoreCase = true) -> {
+                "Netzwerkfehler! Bitte überprüfe deine Internetverbindung."
+            }
+            else -> {
+                "Falsche E-Mail/Passwort oder Benutzer noch nicht registriert!"
+            }
+        }
+    }
+
+    // Beobachtet in Echtzeit, ob gesendete Freundschaftsanfragen akzeptiert wurden
+    fun starteBeobachtungAngenommeneAnfragen(ownerEmail: String, onAccepted: (friendName: String) -> Unit): com.google.firebase.firestore.ListenerRegistration? {
+        if (!networkMonitor.isOnline.value) return null
+        return try {
+            firestore.collection("friend_requests")
+                .whereEqualTo("senderEmail", ownerEmail)
+                .whereEqualTo("status", "ACCEPTED")
+                .addSnapshotListener { snapshots, error ->
+                    if (error != null) {
+                        error.printStackTrace()
+                        return@addSnapshotListener
+                    }
+                    if (snapshots != null && !snapshots.isEmpty) {
+                        for (doc in snapshots.documentChanges) {
+                            if (doc.type == com.google.firebase.firestore.DocumentChange.Type.ADDED ||
+                                doc.type == com.google.firebase.firestore.DocumentChange.Type.MODIFIED) {
+                                val receiverEmail = doc.document.getString("receiverEmail") ?: ""
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    val friendUser = holeBenutzer(receiverEmail)
+                                    val friendName = friendUser?.name ?: receiverEmail
+                                    
+                                    // Lokal auf ACCEPTED aktualisieren
+                                    dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = receiverEmail, status = "ACCEPTED"))
+                                    dao.insertFreund(FreundEntity(ownerEmail = receiverEmail, friendEmail = ownerEmail, status = "ACCEPTED"))
+                                    
+                                    // Callback aufrufen für Toast
+                                    withContext(Dispatchers.Main) {
+                                        onAccepted(friendName)
+                                    }
+                                    
+                                    // Dokument aus friend_requests löschen, da verarbeitet
+                                    try {
+                                        firestore.collection("friend_requests").document(doc.document.id).delete()
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
         }
     }
 

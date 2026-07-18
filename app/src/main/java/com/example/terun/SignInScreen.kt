@@ -196,7 +196,7 @@ fun SignInScreen(
                             repository.synchronisiereProfilBeiLogin(loggedInEmail)
                             onSignInClicked()
                         } else {
-                            errorMessage = result.exceptionOrNull()?.message ?: "Anmeldung fehlgeschlagen!"
+                            errorMessage = repository.translateAuthError(result.exceptionOrNull())
                         }
                     }
                 },
