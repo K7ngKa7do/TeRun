@@ -207,6 +207,60 @@ class SpielRepository(private val context: Context) {
         }
     }
 
+    // Synchronisiert das Benutzerprofil von Firestore nach dem Login.
+    // Stellt sicher, dass der Anzeigename und Statistiken auf allen Geräten korrekt sind.
+    // Priorität: 1. Firestore (Single Source of Truth) → 2. Lokale Room-DB → 3. E-Mail-Präfix
+    suspend fun synchronisiereProfilBeiLogin(email: String) = withContext(Dispatchers.IO) {
+        var profilName: String? = null
+
+        // 1. Versuche den Profilnamen und Statistiken von Firestore zu laden
+        if (networkMonitor.isOnline.value) {
+            try {
+                val snapshot = suspendCancellableCoroutine<com.google.firebase.firestore.DocumentSnapshot?> { continuation ->
+                    firestore.collection("users").document(email).get()
+                        .addOnCompleteListener { task ->
+                            if (task.isSuccessful && task.result != null && task.result.exists()) {
+                                continuation.resume(task.result)
+                            } else {
+                                continuation.resume(null)
+                            }
+                        }
+                }
+                if (snapshot != null) {
+                    profilName = snapshot.getString("name")
+                    // Statistiken ebenfalls synchronisieren (Distanz, Duell-Anzahl)
+                    val distanz = snapshot.getDouble("gesamtDistanz")
+                    val duelleCount = snapshot.getLong("absolvierteDuelleCount")?.toInt()
+                    if (distanz != null) prefs.saveSpielerGesamtDistanz(distanz)
+                    if (duelleCount != null) prefs.saveAbsolvierteDuelleCount(duelleCount)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // 2. Fallback: Lokalen DB-Eintrag verwenden
+        if (profilName.isNullOrBlank()) {
+            profilName = dao.getBenutzerByEmail(email)?.name
+        }
+
+        // 3. Letzter Fallback: E-Mail-Präfix verwenden (z.B. "sami" aus "sami@mail.de")
+        if (profilName.isNullOrBlank()) {
+            profilName = email.substringBefore("@")
+        }
+
+        // Lokale Daten aktualisieren: Room-DB + SharedPreferences
+        val existingUser = dao.getBenutzerByEmail(email)
+        if (existingUser != null) {
+            // Vorhandenen Eintrag nur umbenennen (Passwort bleibt erhalten)
+            dao.updateBenutzerName(email, profilName)
+        } else {
+            // Neuen lokalen Eintrag anlegen (Passwort leer, da Firebase Auth zuständig)
+            dao.insertBenutzer(BenutzerEntity(email, profilName, ""))
+        }
+        prefs.saveDisplayName(email, profilName)
+    }
+
     // Account-Key = E-Mail-Adresse des eingeloggten Nutzers; wird beim Login gesetzt
     fun setAccountKey(email: String) = prefs.saveAccountKey(email)
     fun getAccountKey(): String = prefs.getAccountKey()
@@ -519,8 +573,9 @@ class SpielRepository(private val context: Context) {
                 }
             }
 
-            if (friendUser == null) return@withContext false
-            val friendEmail = friendUser.email
+            // Smart-Cast-sicheren Zugriff auf friendUser erzwingen
+            val resolvedFriend = friendUser ?: return@withContext false
+            val friendEmail = resolvedFriend.email
             if (ownerEmail == friendEmail) return@withContext false
 
             // Lokalen Eintrag als PENDING speichern
@@ -534,9 +589,17 @@ class SpielRepository(private val context: Context) {
                         "receiverEmail" to friendEmail,
                         "status" to "PENDING"
                     )
-                    firestore.collection("friend_requests")
-                        .document("${ownerEmail}_$friendEmail")
-                        .set(requestMap)
+                    // Auf Firestore-Write warten, damit die Anfrage sicher ankommt
+                    suspendCancellableCoroutine<Boolean> { continuation ->
+                        firestore.collection("friend_requests")
+                            .document("${ownerEmail}_$friendEmail")
+                            .set(requestMap)
+                            .addOnSuccessListener { continuation.resume(true) }
+                            .addOnFailureListener { e ->
+                                e.printStackTrace()
+                                continuation.resume(false)
+                            }
+                    }
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }

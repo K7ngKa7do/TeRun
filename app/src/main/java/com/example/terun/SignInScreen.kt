@@ -191,11 +191,9 @@ fun SignInScreen(
                             val loggedInEmail = result.getOrNull() ?: email.trim()
                             repository.setAccountKey(loggedInEmail)
                             
-                            // Versuchen, den Anzeigenamen aus der lokalen DB oder Prefs zu laden
-                            val dbUser = repository.holeBenutzer(loggedInEmail)
-                            if (dbUser != null) {
-                                repository.speichereSpielerName(dbUser.name)
-                            }
+                            // Profil von Firestore synchronisieren (Name + Statistiken)
+                            // Stellt sicher, dass der richtige Anzeigename auch auf anderen Geräten geladen wird
+                            repository.synchronisiereProfilBeiLogin(loggedInEmail)
                             onSignInClicked()
                         } else {
                             errorMessage = result.exceptionOrNull()?.message ?: "Anmeldung fehlgeschlagen!"

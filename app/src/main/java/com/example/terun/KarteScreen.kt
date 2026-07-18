@@ -147,8 +147,10 @@ fun KarteScreen(
                     aktiverTab = gewaehlt
                     if (gewaehlt == Tab.DUELLE) {
                         viewModel.ladeDuelle()
+                        viewModel.ladeDuellEinladungen() // Eingehende Duell-Einladungen aktualisieren
                     } else if (gewaehlt == Tab.PROFIL) {
                         viewModel.ladeFreunde()
+                        viewModel.ladeAusstehendeFreundesanfragen() // Eingehende Freundschaftsanfragen aktualisieren
                     }
                 }
             )
