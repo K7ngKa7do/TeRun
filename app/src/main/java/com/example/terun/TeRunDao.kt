@@ -66,6 +66,10 @@ interface TeRunDao {
     @Query("SELECT * FROM freunde WHERE ownerEmail = :ownerEmail AND status = 'PENDING'")
     fun getPendingRequestsByOwner(ownerEmail: String): List<FreundEntity>
 
+    // Einen bestimmten Freundschafts-Eintrag suchen
+    @Query("SELECT * FROM freunde WHERE ownerEmail = :ownerEmail AND friendEmail = :friendEmail LIMIT 1")
+    fun getFreundschaft(ownerEmail: String, friendEmail: String): FreundEntity?
+
     // Freundschafts-Eintrag speichern; bei Duplikat überschreiben (verhindert doppelte Einträge)
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun insertFreund(freund: FreundEntity): Long

@@ -71,6 +71,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
 
     private var duelInvitationsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var liveSessionListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var acceptedRequestsListener: com.google.firebase.firestore.ListenerRegistration? = null
 
     // --- Routing (Deaktiviert für Meilenstein 5) ---
 
@@ -97,6 +98,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
             freunde.addAll(repository.holeFreunde(repository.getAccountKey())) // Freunde laden
             ladeAusstehendeFreundesanfragen()
             ladeDuellEinladungen()
+            starteBeobachtungAngenommeneAnfragen()
         }
     }
 
@@ -137,12 +139,21 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Freund anhand des Anzeigenamens hinzufügen; onResult liefert true bei Erfolg, false wenn User nicht gefunden
-    fun fuegeFreundHinzu(name: String, onResult: (Boolean) -> Unit) {
+    // Freund anhand des Anzeigenamens hinzufügen; onResult liefert den Status als String
+    fun fuegeFreundHinzu(name: String, onResult: (String) -> Unit) {
         viewModelScope.launch {
-            val success = repository.fuegeFreundHinzu(repository.getAccountKey(), name)
-            if (success) ladeAusstehendeFreundesanfragen() // Anfrage wird gesendet
-            onResult(success)
+            val result = repository.fuegeFreundHinzu(repository.getAccountKey(), name)
+            if (result == "SUCCESS") ladeAusstehendeFreundesanfragen() // Anfrage wird gesendet
+            onResult(result)
+        }
+    }
+
+    // Startet die Echtzeit-Beobachtung für akzeptierte Anfragen
+    fun starteBeobachtungAngenommeneAnfragen() {
+        acceptedRequestsListener?.remove()
+        acceptedRequestsListener = repository.starteBeobachtungAngenommeneAnfragen(repository.getAccountKey()) { friendName ->
+            toastMessage = "$friendName hat deine Anfrage angenommen"
+            ladeFreunde()
         }
     }
 
@@ -583,6 +594,8 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         timerJob?.cancel()                  // Timer stoppen
         stoppeDuellEinladungenBeobachtung()
         stoppeLiveSessionBeobachtung()
+        acceptedRequestsListener?.remove()
+        acceptedRequestsListener = null
         
         val context = getApplication<Application>().applicationContext
         val serviceIntent = Intent(context, TeRunLocationService::class.java)
