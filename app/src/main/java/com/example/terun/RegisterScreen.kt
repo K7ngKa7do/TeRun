@@ -279,22 +279,15 @@ fun RegisterScreen(
                         return@Button
                     }
                     coroutineScope.launch {
-                        val existing = repository.holeBenutzer(email.trim())
-                        if (existing != null) {
-                            errorMessage = "E-Mail ist bereits registriert!"
-                        } else {
-                            // Erfolg: In Room speichern
-                            val newUser = BenutzerEntity(
-                                email = email.trim(),
-                                name = spielername.trim(),
-                                passwort = password
-                            )
-                            repository.speichereBenutzer(newUser)
-                            // Account-Key setzen und Display-Name initialisieren
-                            repository.setAccountKey(newUser.email)
-                            repository.speichereSpielerName(newUser.name)
+                        val result = repository.registrieren(email.trim(), spielername.trim(), password)
+                        if (result.isSuccess) {
+                            val loggedInEmail = result.getOrNull() ?: email.trim()
+                            repository.setAccountKey(loggedInEmail)
+                            repository.speichereSpielerName(spielername.trim())
                             Toast.makeText(context, "Konto erfolgreich erstellt!", Toast.LENGTH_SHORT).show()
                             onRegisterClicked()
+                        } else {
+                            errorMessage = result.exceptionOrNull()?.message ?: "Registrierung fehlgeschlagen!"
                         }
                     }
                 },

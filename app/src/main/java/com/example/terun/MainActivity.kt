@@ -19,23 +19,39 @@ import kotlinx.serialization.Serializable
 @Serializable object RegisterRoute
 @Serializable object HomeRoute
 
+/**
+ * MainActivity — Haupteinstiegspunkt der Android-App (Single Activity-Muster).
+ * Hier wird das OSMDroid Karten-Repository konfiguriert und das Theme geladen.
+ */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // OSMDroid Karten-Konfiguration (Vermeidet Kachel-Ladefehler durch User-Agent Definition)
         org.osmdroid.config.Configuration.getInstance().userAgentValue = "com.example.terun"
+        
+        // Ränder bis zum Bildschirmrand ausnutzen (Edge-to-Edge)
         enableEdgeToEdge()
+        
+        // Compose-Layout mit benutzerdefiniertem TeRun-Design rendern
         setContent { TeRunTheme { TeRunApp() } }
     }
 }
 
+/**
+ * TeRunApp — Zentraler Navigations-Graph der Anwendung.
+ * Verwaltet alle Routen und stellt sicher, dass das SpielRepository als Singleton-Instanz geteilt wird.
+ */
 @Composable
 fun TeRunApp() {
     val context = LocalContext.current
+    // Repository wird hier deklariert und an alle Screens übergeben
     val repository = remember { SpielRepository(context) }
-
     val navController = rememberNavController()
+
     NavHost(navController = navController, startDestination = LoginRoute) {
 
+        // 1. Willkommensscreen (Login / Register Auswahl)
         composable<LoginRoute> {
             LoginScreen(
                 onSignInClicked = { navController.navigate(SignInRoute) },
@@ -43,6 +59,7 @@ fun TeRunApp() {
             )
         }
 
+        // 2. Anmelde-Screen (SignIn)
         composable<SignInRoute> {
             SignInScreen(
                 repository = repository,
@@ -51,6 +68,7 @@ fun TeRunApp() {
             )
         }
 
+        // 3. Registrierungs-Screen (Register)
         composable<RegisterRoute> {
             RegisterScreen(
                 repository = repository,
@@ -59,9 +77,13 @@ fun TeRunApp() {
             )
         }
 
+        // 4. Hauptbildschirm (Karte & Spiel-Steuerung)
         composable<HomeRoute> {
             KarteScreen(onLogout = {
-                navController.navigate(LoginRoute) { popUpTo(HomeRoute) { inclusive = true } }
+                // Bei Logout wird der gesamte Backstack gelöscht, um unbefugten Rückweg zu sperren
+                navController.navigate(LoginRoute) {
+                    popUpTo(HomeRoute) { inclusive = true }
+                }
             })
         }
     }

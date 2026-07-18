@@ -1,9 +1,11 @@
 package com.example.terun
 
 import android.app.Application
+import android.content.Intent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -60,10 +62,17 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     val duelle = mutableStateListOf<Duell>()   // Alle gespeicherten Duelle (aus Room geladen)
     val freunde = mutableStateListOf<String>() // Anzeigenamen der Freunde des eingeloggten Spielers
 
-    // --- Routing ---
-    val routePoints = mutableStateListOf<GeoPoint>() // Wegpunkte der aktuellen Fußgänger-Route (OSRM)
-    private var lastRouteFetchTime = 0L               // Zeitstempel der letzten Route-Abfrage (für Throttling)
-    private var lastQueryPos: GeoPoint? = null        // Letzte Position bei Route-Abfrage (für Bewegungs-Check)
+    // --- Neue Multiplayer- & Live-States ---
+    val ausstehendeFreundesanfragen = mutableStateListOf<String>() // Eingehende Freundesanfragen
+    val ausstehendeDuellEinladungen = mutableStateListOf<Duell>() // Eingehende Duell-Einladungen
+    val gegnerStati = mutableStateMapOf<String, Pair<GeoPoint, Int>>() // GegnerName -> (Position, eroberte Spots)
+    val activeDuelInvitations = mutableStateMapOf<String, String>() // GegnerName -> Status (PENDING, ACCEPTED, DECLINED)
+    var toastMessage by mutableStateOf<String?>(null) // Einfacher Toast-Notifier für Composable-UI
+
+    private var duelInvitationsListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var liveSessionListener: com.google.firebase.firestore.ListenerRegistration? = null
+
+    // --- Routing (Deaktiviert für Meilenstein 5) ---
 
     // --- Spielzustand ---
     var aktivesDuell by mutableStateOf<Duell?>(null) // Das gerade laufende Duell (null = kein Duell aktiv)
@@ -84,7 +93,11 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         spielerGesamtDistanz = repository.ladeGesamtDistanz()       // Gesamtdistanz laden
         absolvierteDuelleCount = repository.ladeAbsolvierteDuelleCount() // Duellanzahl laden
         viewModelScope.launch { duelle.addAll(repository.holeDuelle()) }      // Duelle asynchron aus Room laden
-        viewModelScope.launch { freunde.addAll(repository.holeFreunde(repository.getAccountKey())) } // Freunde laden
+        viewModelScope.launch { 
+            freunde.addAll(repository.holeFreunde(repository.getAccountKey())) // Freunde laden
+            ladeAusstehendeFreundesanfragen()
+            ladeDuellEinladungen()
+        }
     }
 
     // ==========================================================================
@@ -99,11 +112,36 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Duellliste neu laden
+    fun ladeDuelle() {
+        viewModelScope.launch {
+            duelle.clear()
+            duelle.addAll(repository.holeDuelle())
+        }
+    }
+
+    // Holt ausstehende Freundschaftsanfragen
+    fun ladeAusstehendeFreundesanfragen() {
+        viewModelScope.launch {
+            ausstehendeFreundesanfragen.clear()
+            ausstehendeFreundesanfragen.addAll(repository.holeAusstehendeFreundesanfragen(repository.getAccountKey()))
+        }
+    }
+
+    // Antwortet auf eine Freundschaftsanfrage
+    fun antworteAufFreundesanfrage(senderName: String, akzeptiert: Boolean) {
+        viewModelScope.launch {
+            repository.antworteAufFreundesanfrage(repository.getAccountKey(), senderName, akzeptiert)
+            ladeAusstehendeFreundesanfragen()
+            ladeFreunde()
+        }
+    }
+
     // Freund anhand des Anzeigenamens hinzufügen; onResult liefert true bei Erfolg, false wenn User nicht gefunden
     fun fuegeFreundHinzu(name: String, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
             val success = repository.fuegeFreundHinzu(repository.getAccountKey(), name)
-            if (success) ladeFreunde() // Liste nach Erfolg sofort aktualisieren
+            if (success) ladeAusstehendeFreundesanfragen() // Anfrage wird gesendet
             onResult(success)
         }
     }
@@ -114,6 +152,75 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
             repository.loescheFreund(repository.getAccountKey(), name)
             ladeFreunde() // Liste nach Löschen aktualisieren
         }
+    }
+
+    // Lädt ausstehende Duell-Einladungen
+    fun ladeDuellEinladungen() {
+        val myName = spielerName
+        if (myName.isBlank() || !repository.networkMonitor.isOnline.value) return
+        repository.firestore.collection("duels")
+            .whereEqualTo("invitations.$myName", "PENDING")
+            .get()
+            .addOnSuccessListener { result ->
+                ausstehendeDuellEinladungen.clear()
+                for (doc in result.documents) {
+                    val id = doc.getString("id") ?: ""
+                    val name = doc.getString("name") ?: ""
+                    val spotsAnzahl = doc.getLong("spotsAnzahl")?.toInt() ?: 1
+                    val zeitLimitMinuten = doc.getLong("zeitLimitMinuten")?.toInt() ?: 30
+                    val spot1Lat = doc.getDouble("spot1Lat") ?: 0.0
+                    val spot1Lng = doc.getDouble("spot1Lng") ?: 0.0
+                    val spot2Lat = doc.getDouble("spot2Lat") ?: 0.0
+                    val spot2Lng = doc.getDouble("spot2Lng") ?: 0.0
+                    val spot3Lat = doc.getDouble("spot3Lat") ?: 0.0
+                    val spot3Lng = doc.getDouble("spot3Lng") ?: 0.0
+                    val spot4Lat = doc.getDouble("spot4Lat") ?: 0.0
+                    val spot4Lng = doc.getDouble("spot4Lng") ?: 0.0
+                    val spot5Lat = doc.getDouble("spot5Lat") ?: 0.0
+                    val spot5Lng = doc.getDouble("spot5Lng") ?: 0.0
+                    val gegner = doc.getString("gegner") ?: ""
+                    val d = Duell(id, name, spotsAnzahl, zeitLimitMinuten, spot1Lat, spot1Lng, spot2Lat, spot2Lng, spot3Lat, spot3Lng, spot4Lat, spot4Lng, spot5Lat, spot5Lng, gegner)
+                    ausstehendeDuellEinladungen.add(d)
+                }
+            }
+    }
+
+    // Antwortet auf eine Duell-Einladung
+    fun antworteAufDuellEinladung(duell: Duell, akzeptiert: Boolean) {
+        viewModelScope.launch {
+            repository.antworteAufDuellEinladung(duell.id, akzeptiert)
+            ladeDuellEinladungen()
+            if (akzeptiert) {
+                repository.speichereDuell(duell)
+                ladeDuelle()
+            }
+        }
+    }
+
+    // Beobachtet den Einladungs-Status für den Duell-Ersteller
+    fun beobachteDuellEinladungen(duelId: String) {
+        duelInvitationsListener?.remove()
+        activeDuelInvitations.clear()
+        if (!repository.networkMonitor.isOnline.value) return
+        duelInvitationsListener = repository.firestore.collection("duels").document(duelId)
+            .addSnapshotListener { snapshot, error ->
+                if (snapshot != null && snapshot.exists()) {
+                    val invitations = snapshot.get("invitations") as? Map<String, String> ?: emptyMap()
+                    for ((gegnerName, status) in invitations) {
+                        val alterStatus = activeDuelInvitations[gegnerName]
+                        if (alterStatus != null && alterStatus != status) {
+                            toastMessage = "Spieler $gegnerName hat das Spiel $status!"
+                        }
+                        activeDuelInvitations[gegnerName] = status
+                    }
+                }
+            }
+    }
+
+    fun stoppeDuellEinladungenBeobachtung() {
+        duelInvitationsListener?.remove()
+        duelInvitationsListener = null
+        activeDuelInvitations.clear()
     }
 
     // ==========================================================================
@@ -172,32 +279,53 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
 
     // GPS-Updates starten; bei jeder neuen Position: Distanz berechnen, Spots prüfen, Route aktualisieren
     fun starteStandortAbfrage() {
-        locationHelper.startLocationUpdates { location ->
-            val prevPos = spielerPosition
-            val currentGeo = GeoPoint(location.latitude, location.longitude)
-            spielerPosition = currentGeo
+        // Empfange Updates vom Foreground Service, falls dieser läuft
+        TeRunLocationService.onLocationReceived = { location ->
+            onLocationUpdated(location)
+        }
 
-            // Distanz nur während laufendem Duell und wenn eine Vorposition bekannt ist
-            if (status == SpielStatus.LAEUFT && prevPos != null) {
-                spielerGesamtDistanz += calculateDistance(
-                    prevPos.latitude, prevPos.longitude,
-                    currentGeo.latitude, currentGeo.longitude
-                ) / 1000.0 // Meter → Kilometer
-                repository.speichereGesamtDistanz(spielerGesamtDistanz)
+        // Starte normale Ortung nur im Vordergrund, falls kein Duell aktiv ist
+        if (status != SpielStatus.LAEUFT) {
+            locationHelper.startLocationUpdates { location ->
+                onLocationUpdated(location)
             }
-            // Spot-Erkennung und Route-Update nur während laufendem Duell
-            if (status == SpielStatus.LAEUFT) {
-                checkSpotsCaptured(location.latitude, location.longitude)
-                checkAndUpdateRoutePath()
+        }
+    }
+
+    private fun onLocationUpdated(location: android.location.Location) {
+        val prevPos = spielerPosition
+        val currentGeo = GeoPoint(location.latitude, location.longitude)
+        spielerPosition = currentGeo
+
+        // Distanz nur während laufendem Duell und wenn eine Vorposition bekannt ist
+        if (status == SpielStatus.LAEUFT && prevPos != null) {
+            spielerGesamtDistanz += calculateDistance(
+                prevPos.latitude, prevPos.longitude,
+                currentGeo.latitude, currentGeo.longitude
+            ) / 1000.0 // Meter → Kilometer
+            repository.speichereGesamtDistanz(spielerGesamtDistanz)
+        }
+        // Spot-Erkennung nur während laufendem Duell
+        if (status == SpielStatus.LAEUFT) {
+            checkSpotsCaptured(location.latitude, location.longitude)
+
+            // Live-Position & Score an die Multiplayer-Session senden
+            val active = aktivesDuell
+            if (active != null) {
+                val score = (1..active.spotsAnzahl).count { capturedForIndex(it) }
+                repository.updateLiveSession(
+                    active.id,
+                    spielerName,
+                    location.latitude,
+                    location.longitude,
+                    score
+                )
             }
         }
     }
 
     // Duell starten: Zustand zurücksetzen, Timer starten, GPS aktivieren
     fun duellStarten(duell: Duell) {
-        routePoints.clear()       // Alte Route löschen
-        lastRouteFetchTime = 0L   // Throttling zurücksetzen
-        lastQueryPos = null
         aktivesDuell = duell
         status = SpielStatus.LAEUFT
         verbleibendeZeit = duell.zeitLimitMinuten * 60 // Minuten → Sekunden umrechnen
@@ -208,6 +336,22 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         spot4Captured = false
         spot5Captured = false
         startPositionGeo = spielerPosition // Startpunkt merken (= späterer Zielpunkt nach allen Spots)
+
+        // Snapshot-Listener für Multiplayer-Gegner und Scores starten
+        startLiveSessionBeobachtung(duell.id)
+
+        // Foreground Service für Hintergrundortung starten
+        val context = getApplication<Application>().applicationContext
+        val serviceIntent = Intent(context, TeRunLocationService::class.java)
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
 
         starteStandortAbfrage()
         timerJob?.cancel() // Eventuell laufenden alten Timer stoppen
@@ -226,14 +370,30 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
 
     // Duell beenden: Ergebnisse berechnen, Status setzen, Benachrichtigung senden
     fun duellBeenden(success: Boolean = false, aufgegeben: Boolean = false) {
-        routePoints.clear()
         timerJob?.cancel()
         timerJob = null
+
+        stoppeLiveSessionBeobachtung()
+        val active = aktivesDuell
+        if (active != null) {
+            repository.loescheLiveSession(active.id)
+        }
+
+        // Foreground Service für Hintergrundortung stoppen
+        val context = getApplication<Application>().applicationContext
+        val serviceIntent = Intent(context, TeRunLocationService::class.java)
+        try {
+            context.stopService(serviceIntent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         locationHelper.stopLocationUpdates()
+        TeRunLocationService.onLocationReceived = null
+
         absolvierteDuelleCount += 1
         repository.speichereAbsolvierteDuelleCount(absolvierteDuelleCount)
 
-        val active = aktivesDuell
         // Ergebnisliste zusammenbauen
         ergebnisse = if (active != null) {
             val count = active.spotsAnzahl
@@ -248,8 +408,11 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
             val playerSpots = if (aufgegeben) 0 else (1..count).count { capturedForIndex(it) }
             val resultsList = buildList {
                 add(Ergebnis(spielerName, playerSpots, aufgegeben))
-                // Gegner erhalten 0 Spots (da kein Live-Tracking der Gegner implementiert)
-                participants.drop(1).forEach { add(Ergebnis(it, 0, false)) }
+                // Live-Scores der Gegner aus dem Firebase-Listener übernehmen
+                participants.drop(1).forEach { opponentName ->
+                    val opponentSpots = gegnerStati[opponentName]?.second ?: 0
+                    add(Ergebnis(opponentName, opponentSpots, false))
+                }
             }
             // Aufgegebene Spieler ans Ende sortieren; dann nach Spot-Anzahl absteigend
             resultsList.sortedWith(compareBy<Ergebnis> { it.aufgegeben }.thenByDescending { it.spots })
@@ -270,12 +433,48 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
 
     // Zurück zur Karte: Duell-State bereinigen ohne Ergebnis-Screen
     fun zurueckZurKarte() {
-        routePoints.clear()
         timerJob?.cancel()
         timerJob = null
+        stoppeLiveSessionBeobachtung()
+        val active = aktivesDuell
+        if (active != null) {
+            repository.loescheLiveSession(active.id)
+        }
         locationHelper.stopLocationUpdates()
         status = SpielStatus.IDLE
         aktivesDuell = null
+    }
+
+    // Beobachtet das gegnerische Tracking in Echtzeit
+    fun startLiveSessionBeobachtung(duelId: String) {
+        liveSessionListener?.remove()
+        gegnerStati.clear()
+        if (!repository.networkMonitor.isOnline.value) return
+        liveSessionListener = repository.firestore.collection("duel_sessions").document(duelId)
+            .addSnapshotListener { snapshot, error ->
+                if (snapshot != null && snapshot.exists()) {
+                    val data = snapshot.data ?: return@addSnapshotListener
+                    for ((name, valueMap) in data) {
+                        if (name == spielerName) continue // Eigenen State überspringen
+                        val m = valueMap as? Map<String, Any> ?: continue
+                        val lat = (m["lat"] as? Number)?.toDouble() ?: 0.0
+                        val lng = (m["lng"] as? Number)?.toDouble() ?: 0.0
+                        val spots = (m["spotsCaptured"] as? Number)?.toInt() ?: 0
+
+                        val alterState = gegnerStati[name]
+                        if (alterState != null && spots > alterState.second) {
+                            toastMessage = "Spieler $name hat einen Spot erobert!"
+                        }
+                        gegnerStati[name] = GeoPoint(lat, lng) to spots
+                    }
+                }
+            }
+    }
+
+    fun stoppeLiveSessionBeobachtung() {
+        liveSessionListener?.remove()
+        liveSessionListener = null
+        gegnerStati.clear()
     }
 
     // ==========================================================================
@@ -311,6 +510,20 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
             5 -> spot5Captured = true
         }
         notificationHelper.sendNotification("Spot erobert!", "Du hast Spot $idx erobert!")
+
+        // Sofortiges Update an die Live-Session senden
+        val active = aktivesDuell
+        val pos = spielerPosition
+        if (active != null && pos != null) {
+            val score = (1..active.spotsAnzahl).count { capturedForIndex(it) }
+            repository.updateLiveSession(
+                active.id,
+                spielerName,
+                pos.latitude,
+                pos.longitude,
+                score
+            )
+        }
     }
 
     // Prüft bei jeder GPS-Aktualisierung, ob der Spieler nah genug an einem Spot oder dem Ziel ist
@@ -331,81 +544,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // ==========================================================================
-    // Routing (OSRM)
-    // ==========================================================================
 
-    // Fußgänger-Route zum nächsten offenen Spot vom OSRM-Server abrufen
-    // Throttling: max. alle 3 Sekunden und nur bei Bewegung > 5 Meter
-    fun checkAndUpdateRoutePath() {
-        val userPos = spielerPosition ?: return
-        val active = aktivesDuell ?: return
-        if (status != SpielStatus.LAEUFT) return
-
-        // Nächsten noch nicht erreichten Spot als Ziel bestimmen
-        val nextSpot = (1..active.spotsAnzahl).firstOrNull { !capturedForIndex(it) }
-        val (targetLat, targetLng) = if (nextSpot != null) {
-            spotCoords(active, nextSpot)
-        } else {
-            // Alle Spots erledigt → Startpunkt als Ziel (Rückweg)
-            (startPositionGeo?.latitude ?: 0.0) to (startPositionGeo?.longitude ?: 0.0)
-        }
-        val targetPos = GeoPoint(targetLat, targetLng)
-
-        // Throttle: nicht öfter als alle 3 Sekunden abfragen
-        val now = System.currentTimeMillis()
-        if (now - lastRouteFetchTime < 3000) return
-
-        // Keine neue Abfrage wenn der Spieler sich weniger als 5 Meter bewegt hat
-        val lastPos = lastQueryPos
-        if (lastPos != null && calculateDistance(
-                userPos.latitude, userPos.longitude,
-                lastPos.latitude, lastPos.longitude
-            ) < 5.0
-        ) return
-
-        lastRouteFetchTime = now
-        lastQueryPos = userPos
-
-        // HTTP-Anfrage im IO-Thread; Ergebnis auf Main-Thread zurückschreiben
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                // OSRM-API-URL für Fußgänger-Route zusammenbauen
-                val urlStr = "https://router.project-osrm.org/route/v1/foot/" +
-                        "${userPos.longitude},${userPos.latitude};" +
-                        "${targetPos.longitude},${targetPos.latitude}" +
-                        "?overview=full&geometries=geojson"
-                val conn = URL(urlStr).openConnection() as HttpURLConnection
-                conn.requestMethod = "GET"
-                conn.connectTimeout = 3000
-                conn.readTimeout = 3000
-
-                if (conn.responseCode == 200) {
-                    // JSON-Antwort parsen und GeoPoint-Liste aufbauen
-                    val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-                    val routes = json.getJSONArray("routes")
-                    if (routes.length() > 0) {
-                        val coords = routes.getJSONObject(0)
-                            .getJSONObject("geometry")
-                            .getJSONArray("coordinates")
-                        val tempPoints = mutableListOf<GeoPoint>()
-                        for (i in 0 until coords.length()) {
-                            val coord = coords.getJSONArray(i)
-                            // OSRM liefert [lng, lat] → wir brauchen (lat, lng)
-                            tempPoints.add(GeoPoint(coord.getDouble(1), coord.getDouble(0)))
-                        }
-                        // Route auf dem Main-Thread in den UI-State schreiben
-                        withContext(Dispatchers.Main) {
-                            routePoints.clear()
-                            routePoints.addAll(tempPoints)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace() // Netzwerkfehler ignorieren; alte Route bleibt bestehen
-            }
-        }
-    }
 
     // ==========================================================================
     // Benutzersuche
@@ -442,6 +581,18 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     override fun onCleared() {
         super.onCleared()
         timerJob?.cancel()                  // Timer stoppen
+        stoppeDuellEinladungenBeobachtung()
+        stoppeLiveSessionBeobachtung()
+        
+        val context = getApplication<Application>().applicationContext
+        val serviceIntent = Intent(context, TeRunLocationService::class.java)
+        try {
+            context.stopService(serviceIntent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         locationHelper.stopLocationUpdates() // GPS-Updates abmelden
+        TeRunLocationService.onLocationReceived = null
     }
 }

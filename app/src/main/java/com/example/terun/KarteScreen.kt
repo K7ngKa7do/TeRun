@@ -76,6 +76,14 @@ fun KarteScreen(
     val context = LocalContext.current
     val duellLaeuft = (status == SpielStatus.LAEUFT)
 
+    // Beobachte Toast-Nachrichten aus dem ViewModel
+    LaunchedEffect(viewModel.toastMessage) {
+        viewModel.toastMessage?.let { msg ->
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+            viewModel.toastMessage = null
+        }
+    }
+
     // Dialog-Status zur Auswahl eines Duells vor dem Start
     var showSelectDuelDialog by remember { mutableStateOf(false) }
 
@@ -135,7 +143,14 @@ fun KarteScreen(
         bottomBar = {
             TeRunBottomNavigation(
                 aktiverTab = aktiverTab,
-                onTabClick = { gewaehlt -> aktiverTab = gewaehlt }
+                onTabClick = { gewaehlt ->
+                    aktiverTab = gewaehlt
+                    if (gewaehlt == Tab.DUELLE) {
+                        viewModel.ladeDuelle()
+                    } else if (gewaehlt == Tab.PROFIL) {
+                        viewModel.ladeFreunde()
+                    }
+                }
             )
         }
     ) { paddingValues ->
@@ -222,6 +237,18 @@ fun KarteScreen(
                                         }
                                         mapView.overlays.add(finishMarker)
 
+                                        // 2.5 Gegner-Marker auf der Karte zeichnen (roter maps-style Dot)
+                                        for ((gegnerName, statePair) in viewModel.gegnerStati) {
+                                            val gegnerPos = statePair.first
+                                            val enemyMarker = Marker(mapView).apply {
+                                                position = gegnerPos
+                                                title = "$gegnerName (${statePair.second} Spots)"
+                                                icon = createEnemyLocationDot(context)
+                                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                                            }
+                                            mapView.overlays.add(enemyMarker)
+                                        }
+
                                         val count = active.spotsAnzahl
                                         // 3. Spots mit sich farblich ändernden Icons zeichnen
                                         if (count >= 1) {
@@ -289,33 +316,42 @@ fun KarteScreen(
                                             mapView.overlays.add(spot5Marker)
                                         }
 
-                                        // 4. Pfad-Verbindungslinie zum nächsten offenen Spot zeichnen
-                                        val nextSpotGeo = when {
-                                            count >= 1 && !viewModel.spot1Captured -> GeoPoint(active.spot1Lat, active.spot1Lng)
-                                            count >= 2 && !viewModel.spot2Captured -> GeoPoint(active.spot2Lat, active.spot2Lng)
-                                            count >= 3 && !viewModel.spot3Captured -> GeoPoint(active.spot3Lat, active.spot3Lng)
-                                            count >= 4 && !viewModel.spot4Captured -> GeoPoint(active.spot4Lat, active.spot4Lng)
-                                            count >= 5 && !viewModel.spot5Captured -> GeoPoint(active.spot5Lat, active.spot5Lng)
-                                            else -> finishPos
-                                        }
-
-                                        val routePolyline = Polyline().apply {
-                                            if (viewModel.routePoints.isNotEmpty()) {
-                                                setPoints(viewModel.routePoints)
-                                            } else {
-                                                setPoints(listOf(currentPos, nextSpotGeo))
-                                            }
-                                            outlinePaint.color = android.graphics.Color.parseColor("#0088FF")
-                                            outlinePaint.strokeWidth = 8f
-                                            outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(15f, 15f), 0f)
-                                        }
-                                        mapView.overlays.add(routePolyline)
+                                        // 4. Pfad-Verbindungslinie ist deaktiviert.
+                                        // Die Spieler müssen die Spots eigenständig ohne Führungslinie finden!
                                     }
 
                                     mapView.invalidate()
                                 },
                                 modifier = Modifier.fillMaxSize()
                             )
+
+                            // Live Multiplayer-Scoreboard (Meilenstein 5)
+                            val active = viewModel.aktivesDuell
+                            if (duellLaeuft && active != null) {
+                                val myScore = listOf(
+                                    viewModel.spot1Captured,
+                                    viewModel.spot2Captured,
+                                    viewModel.spot3Captured,
+                                    viewModel.spot4Captured,
+                                    viewModel.spot5Captured
+                                ).take(active.spotsAnzahl).count { it }
+
+                                GlassmorphicCard(
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .padding(top = 80.dp, start = 14.dp) // Unter der Top-Bar platzieren
+                                        .width(200.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text("Punkte-Stand", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text("Du: $myScore / ${active.spotsAnzahl} Spots", color = TeRunBlue, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                        viewModel.gegnerStati.forEach { (name, statePair) ->
+                                            Text("$name: ${statePair.second} / ${active.spotsAnzahl} Spots", color = Color.Red, fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
 
                             // Karten-Steuerungsknöpfe auf der rechten Seite (Locate, Zoom In, Zoom Out)
                             Column(
@@ -420,12 +456,27 @@ fun KarteScreen(
     }
 
     // Dialog zur Auswahl des gewünschten Duells vor Spielstart (Solid dark container für perfekte Lesbarkeit)
+    var selectedDuelToInspect by remember { mutableStateOf<Duell?>(null) }
+
     if (showSelectDuelDialog) {
+        // Registriere Beobachtung, wenn ein Duell inspiziert wird
+        LaunchedEffect(selectedDuelToInspect) {
+            if (selectedDuelToInspect != null) {
+                viewModel.beobachteDuellEinladungen(selectedDuelToInspect!!.id)
+            } else {
+                viewModel.stoppeDuellEinladungenBeobachtung()
+            }
+        }
+
         AlertDialog(
-            onDismissRequest = { showSelectDuelDialog = false },
+            onDismissRequest = {
+                showSelectDuelDialog = false
+                selectedDuelToInspect = null
+                viewModel.stoppeDuellEinladungenBeobachtung()
+            },
             title = {
                 Text(
-                    text = "Duell auswählen",
+                    text = if (selectedDuelToInspect == null) "Duell auswählen" else "Duell-Details & Status",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
@@ -433,47 +484,136 @@ fun KarteScreen(
             },
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "Wähle aus, welches Duell gestartet werden soll:",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
+                    val duell = selectedDuelToInspect
+                    if (duell == null) {
+                        Text(
+                            text = "Wähle aus, welches Duell gestartet werden soll:",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
 
-                    viewModel.duelle.forEach { duell ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .clickable {
-                                    hasCenteredMap = false // Zentrierung zurücksetzen für das neue Duell
-                                    viewModel.duellStarten(duell)
-                                    showSelectDuelDialog = false
-                                },
-                            colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.08f)),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(
-                                    text = duell.name,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp
-                                )
-                                Text(
-                                    text = "${duell.spotsAnzahl} Spots | ${duell.zeitLimitMinuten} Min",
-                                    color = Color.White.copy(alpha = 0.5f),
-                                    fontSize = 12.sp
-                                )
+                        viewModel.duelle.forEach { d ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .clickable {
+                                        selectedDuelToInspect = d
+                                    },
+                                colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.08f)),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        text = d.name,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "${d.spotsAnzahl} Spots | ${d.zeitLimitMinuten} Min",
+                                        color = Color.White.copy(alpha = 0.5f),
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // Details eines Duells inspizieren
+                        Text(
+                            text = "Duell: ${duell.name}",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 16.sp,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        Text(
+                            text = "${duell.spotsAnzahl} Spots | ${duell.zeitLimitMinuten} Minuten",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+
+                        val opponents = duell.gegner.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                        if (opponents.isEmpty()) {
+                            Text("Solo-Duell (bereit zum Starten)", color = TeRunBlue, fontSize = 13.sp)
+                        } else {
+                            Text("Einladungs-Status der Gegner:", color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            opponents.forEach { opponent ->
+                                val statusVal = viewModel.activeDuelInvitations[opponent] ?: "PENDING"
+                                val statusColor = when (statusVal) {
+                                    "ACCEPTED" -> Color.Green
+                                    "DECLINED" -> Color.Red
+                                    else -> Color.Yellow
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(opponent, color = Color.White, fontSize = 13.sp)
+                                    Text(
+                                        text = when (statusVal) {
+                                            "ACCEPTED" -> "Zugelassen ✓"
+                                            "DECLINED" -> "Abgelehnt ✗"
+                                            else -> "Ausstehend..."
+                                        },
+                                        color = statusColor,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showSelectDuelDialog = false }) {
-                    Text("Abbrechen", color = TeRunBlue, fontWeight = FontWeight.Bold)
+                val duell = selectedDuelToInspect
+                if (duell != null) {
+                    val opponents = duell.gegner.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                    val isBlocked = opponents.any { opponent ->
+                        val statusVal = viewModel.activeDuelInvitations[opponent] ?: "PENDING"
+                        statusVal == "PENDING"
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = {
+                            selectedDuelToInspect = null
+                            viewModel.stoppeDuellEinladungenBeobachtung()
+                        }) {
+                            Text("Zurück", color = Color.White.copy(alpha = 0.6f))
+                        }
+                        Button(
+                            onClick = {
+                                hasCenteredMap = false
+                                viewModel.duellStarten(duell)
+                                showSelectDuelDialog = false
+                                selectedDuelToInspect = null
+                                viewModel.stoppeDuellEinladungenBeobachtung()
+                            },
+                            enabled = !isBlocked,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = TeRunBlue,
+                                disabledContainerColor = Color.White.copy(alpha = 0.15f)
+                            )
+                        ) {
+                            Text(
+                                text = if (isBlocked) "Warte auf Gegner..." else "Jetzt Starten",
+                                color = if (isBlocked) Color.White.copy(alpha = 0.4f) else Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                } else {
+                    TextButton(onClick = {
+                        showSelectDuelDialog = false
+                        viewModel.stoppeDuellEinladungenBeobachtung()
+                    }) {
+                        Text("Abbrechen", color = TeRunBlue, fontWeight = FontWeight.Bold)
+                    }
                 }
             },
             containerColor = DarkBackground,
@@ -481,8 +621,6 @@ fun KarteScreen(
         )
     }
 }
-
-
 
 // End-Screen
 @Composable
@@ -1341,6 +1479,10 @@ fun DuelleTabContent(
 ) {
     var showCreateDuelScreen by remember { mutableStateOf(false) }
 
+    LaunchedEffect(Unit) {
+        viewModel.ladeDuellEinladungen()
+    }
+
     if (showCreateDuelScreen) {
         DuellErstellenScreen(
             onDismiss = { showCreateDuelScreen = false },
@@ -1368,6 +1510,74 @@ fun DuelleTabContent(
             )
 
             Spacer(modifier = Modifier.height(20.dp))
+
+            // --- Eingehende Duell-Einladungen (Meilenstein 5) ---
+            if (viewModel.ausstehendeDuellEinladungen.isNotEmpty()) {
+                Text(
+                    text = "Ausstehende Einladungen (${viewModel.ausstehendeDuellEinladungen.size})",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                viewModel.ausstehendeDuellEinladungen.forEach { duell ->
+                    val hrs = duell.zeitLimitMinuten / 60
+                    val mins = duell.zeitLimitMinuten % 60
+                    val durationText = if (hrs > 0) "${hrs} Std ${mins} Min" else "${mins} Min"
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.08f)),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, TeRunBlue.copy(alpha = 0.4f)) // Highlight border in Blue
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text(
+                                text = duell.name,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "${duell.spotsAnzahl} Spots | $durationText",
+                                color = Color.White.copy(alpha = 0.6f),
+                                fontSize = 12.sp
+                            )
+                            if (duell.gegner.isNotEmpty()) {
+                                Text(
+                                    text = "Mitbewerber: ${duell.gegner}",
+                                    color = Color.White.copy(alpha = 0.5f),
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(
+                                    onClick = { viewModel.antworteAufDuellEinladung(duell, akzeptiert = false) },
+                                    modifier = Modifier.padding(end = 8.dp)
+                                ) {
+                                    Text("Ablehnen", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                                Button(
+                                    onClick = { viewModel.antworteAufDuellEinladung(duell, akzeptiert = true) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = TeRunBlue),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text("Zustimmen", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+            }
 
             Text(
                 text = "Verfügbare Duelle",
@@ -1668,10 +1878,10 @@ fun ProfilTabContent(
                         } else {
                             viewModel.fuegeFreundHinzu(inputTrimmed) { success ->
                                 if (success) {
-                                    Toast.makeText(context, "Freund erfolgreich hinzugefügt!", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Freundschaftsanfrage gesendet!", Toast.LENGTH_SHORT).show()
                                     friendNameInput = ""
                                 } else {
-                                    Toast.makeText(context, "User not found", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Spieler nicht gefunden", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }
@@ -1681,6 +1891,52 @@ fun ProfilTabContent(
                     modifier = Modifier.height(52.dp)
                 ) {
                     Text("Hinzufügen", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+            }
+
+            // --- Ausstehende Freundschaftsanfragen ---
+            if (viewModel.ausstehendeFreundesanfragen.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Freundschaftsanfragen (${viewModel.ausstehendeFreundesanfragen.size})",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                viewModel.ausstehendeFreundesanfragen.forEach { senderName ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = senderName,
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(
+                                onClick = { viewModel.antworteAufFreundesanfrage(senderName, akzeptiert = true) },
+                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("Zustimmen", color = Color.Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                            TextButton(
+                                onClick = { viewModel.antworteAufFreundesanfrage(senderName, akzeptiert = false) },
+                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("Ablehnen", color = Color.Red, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1810,6 +2066,28 @@ fun createUserLocationDot(context: Context): android.graphics.drawable.Drawable 
 
     // Central solid blue dot
     paint.color = android.graphics.Color.parseColor("#0088FF")
+    canvas.drawCircle(size / 2f, size / 2f, 5.5f * density, paint)
+
+    return android.graphics.drawable.BitmapDrawable(context.resources, bitmap)
+}
+
+fun createEnemyLocationDot(context: Context): android.graphics.drawable.Drawable {
+    val density = context.resources.displayMetrics.density
+    val size = (24 * density).toInt()
+    val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+    // Outer light red semi-transparent glow/circle (Google Maps style in Red)
+    paint.color = android.graphics.Color.parseColor("#44FF3333")
+    canvas.drawCircle(size / 2f, size / 2f, 11 * density, paint)
+
+    // White outline circle
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawCircle(size / 2f, size / 2f, 7.5f * density, paint)
+
+    // Central solid red dot
+    paint.color = android.graphics.Color.parseColor("#FF3333")
     canvas.drawCircle(size / 2f, size / 2f, 5.5f * density, paint)
 
     return android.graphics.drawable.BitmapDrawable(context.resources, bitmap)

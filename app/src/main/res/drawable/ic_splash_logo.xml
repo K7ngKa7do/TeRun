@@ -1,0 +1,30 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Abgerundetes blaues Quadrat (Squircle) als Hintergrund (Größe 80x80, Eckenradius 16) -->
+    <path
+        android:fillColor="#1A6FF5"
+        android:pathData="M30,14 h48 a16,16 0 0 1 16,16 v48 a16,16 0 0 1 -16,16 h-48 a16,16 0 0 1 -16,-16 v-48 a16,16 0 0 1 16,-16 z" />
+
+    <!-- Das weiße TeRun-T zentriert platziert (Größe 54x54) -->
+    <group
+        android:translateX="27"
+        android:translateY="27"
+        android:scaleX="0.5"
+        android:scaleY="0.5">
+        <!-- Linker oberer Balken mit Rundung -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M8,15 C10,8 16,6 24,6 L42,6 C35,10 31,17 30,25 L9,25 C4,25 3,18 8,15 Z" />
+        <!-- Rechter oberer Balken mit Rundung -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M48,6 L90,6 C98,6 99,25 89,25 L52,25 C48,18 49,11 48,6 Z" />
+        <!-- Schräger Stamm des T -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M50,25 C48,30 46,36 44,42 L30,84 C27,94 22,98 13,98 L3,98 L28,25 L50,25 Z" />
+    </group>
+</vector>

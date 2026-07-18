@@ -186,19 +186,19 @@ fun SignInScreen(
                         return@Button
                     }
                     coroutineScope.launch {
-                        val user = repository.holeBenutzer(email.trim())
-                        if (user == null) {
-                            errorMessage = "E-Mail nicht registriert!"
-                        } else if (user.passwort != password) {
-                            errorMessage = "Falsches Passwort!"
-                        } else {
-                            // Erfolg: Email als stabilen Account-Key setzen
-                            repository.setAccountKey(user.email)
-                            // Display-Name nur beim ersten Login setzen (Standard = DB-Name)
-                            if (repository.ladeSpielerName().isBlank() || repository.ladeSpielerName() == "Spieler") {
-                                repository.speichereSpielerName(user.name)
+                        val result = repository.anmelden(email.trim(), password)
+                        if (result.isSuccess) {
+                            val loggedInEmail = result.getOrNull() ?: email.trim()
+                            repository.setAccountKey(loggedInEmail)
+                            
+                            // Versuchen, den Anzeigenamen aus der lokalen DB oder Prefs zu laden
+                            val dbUser = repository.holeBenutzer(loggedInEmail)
+                            if (dbUser != null) {
+                                repository.speichereSpielerName(dbUser.name)
                             }
                             onSignInClicked()
+                        } else {
+                            errorMessage = result.exceptionOrNull()?.message ?: "Anmeldung fehlgeschlagen!"
                         }
                     }
                 },

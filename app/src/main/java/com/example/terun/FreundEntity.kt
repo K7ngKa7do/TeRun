@@ -11,5 +11,6 @@ import androidx.room.Entity
 @Entity(tableName = "freunde", primaryKeys = ["ownerEmail", "friendEmail"])
 data class FreundEntity(
     val ownerEmail: String,  // E-Mail des Spielers, dem der Freund gehört
-    val friendEmail: String  // E-Mail des befreundeten Spielers
+    val friendEmail: String, // E-Mail des befreundeten Spielers
+    val status: String = "ACCEPTED" // "ACCEPTED" (befreundet) oder "PENDING" (Anfrage ausstehend)
 )

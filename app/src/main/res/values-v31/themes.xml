@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-
+    <!-- Theme override specifically for API 31+ (Android 12+) to support the Splash Screen API -->
     <style name="Theme.TeRun" parent="android:Theme.Material.Light.NoActionBar">
         <!-- Statusbar & Navigationbar styling to match dark theme -->
         <item name="android:statusBarColor">#0D1B2A</item>
         <item name="android:navigationBarColor">#0D1B2A</item>
         <item name="android:windowBackground">#0D1B2A</item>
+
+        <!-- Splash Screen attributes (only safe/allowed starting API 31) -->
+        <item name="android:windowSplashScreenBackground">#0D1B2A</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
     </style>
 </resources>

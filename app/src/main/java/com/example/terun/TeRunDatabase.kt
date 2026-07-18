@@ -12,9 +12,10 @@ import androidx.room.RoomDatabase
  * version = 11: Bei strukturellen Schema-Änderungen muss die Version erhöht werden.
  * fallbackToDestructiveMigration: Bei fehlender Migration wird die DB gelöscht und neu erstellt.
  */
-@Database(
-    entities = [DuellEntity::class, ErgebnisEntity::class, BenutzerEntity::class, FreundEntity::class],
-    version = 11,
+
+//Hier werden alle Tabellen der App definiert. Version 12 zeigt, dass die Struktur während der Entwicklung mehrfach erweitert wurde.
+@Database(entities = [DuellEntity::class, ErgebnisEntity::class, BenutzerEntity::class, FreundEntity::class],
+    version = 12,
     exportSchema = false // Schema-Datei nicht exportieren (nur für Produktions-Apps relevant)
 )
 abstract class TeRunDatabase : RoomDatabase() {

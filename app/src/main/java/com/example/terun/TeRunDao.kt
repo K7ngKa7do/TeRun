@@ -58,9 +58,13 @@ interface TeRunDao {
 
     // --- Freunde ---
 
-    // Alle Freundschafts-Einträge eines bestimmten Nutzers laden
-    @Query("SELECT * FROM freunde WHERE ownerEmail = :ownerEmail")
+    // Alle Freundschafts-Einträge eines bestimmten Nutzers laden (nur bestätigte Freunde)
+    @Query("SELECT * FROM freunde WHERE ownerEmail = :ownerEmail AND status = 'ACCEPTED'")
     fun getFreundeByOwner(ownerEmail: String): List<FreundEntity>
+
+    // Alle ausstehenden Freundschaftsanfragen eines bestimmten Nutzers laden
+    @Query("SELECT * FROM freunde WHERE ownerEmail = :ownerEmail AND status = 'PENDING'")
+    fun getPendingRequestsByOwner(ownerEmail: String): List<FreundEntity>
 
     // Freundschafts-Eintrag speichern; bei Duplikat überschreiben (verhindert doppelte Einträge)
     @Insert(onConflict = OnConflictStrategy.REPLACE)
