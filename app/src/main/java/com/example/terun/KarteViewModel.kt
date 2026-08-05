@@ -626,8 +626,6 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-
-
     // ==========================================================================
     // Benutzersuche
     // ==========================================================================
