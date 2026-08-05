@@ -5,7 +5,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
@@ -14,44 +13,96 @@ import androidx.navigation.compose.rememberNavController
 import com.example.terun.ui.theme.TeRunTheme
 import kotlinx.serialization.Serializable
 
-@Serializable object LoginRoute
-@Serializable object SignInRoute
-@Serializable object RegisterRoute
-@Serializable object HomeRoute
+/**
+ * =====================================================================
+ * Routen-Definitionen für den Navigations-Graphen
+ * =====================================================================
+ *
+ * VORLESUNG 16 – Navigation (Jetpack Compose Navigation):
+ * Jede Route ist ein Kotlin-Objekt mit @Serializable, damit die Navigation
+ * typsicher ist. Das bedeutet: der Compiler erkennt Fehler in den Routen
+ * schon beim Übersetzen des Codes, nicht erst zur Laufzeit.
+ *
+ * Alternative zu einfachen Strings ("login", "home"): Strings sind fehleranfällig,
+ * da Tippfehler nicht auffallen. Objekte mit @Serializable sind sicherer.
+ */
+@Serializable object LoginRoute    // Willkommensscreen (Anmelden oder Registrieren)
+@Serializable object SignInRoute   // Anmeldescreen (E-Mail + Passwort eingeben)
+@Serializable object RegisterRoute // Registrierungsscreen (neues Konto erstellen)
+@Serializable object HomeRoute     // Hauptscreen (Karte, Duelle, Profil)
 
 /**
- * MainActivity — Haupteinstiegspunkt der Android-App (Single Activity-Muster).
- * Hier wird das OSMDroid Karten-Repository konfiguriert und das Theme geladen.
+ * =====================================================================
+ * MainActivity – Einziger Einstiegspunkt der App (Single Activity Pattern)
+ * =====================================================================
+ *
+ * VORLESUNG 8 – App-Komponenten (Activities):
+ * Eine Activity ist die grundlegende UI-Komponente in Android.
+ * Das "Single Activity Pattern" bedeutet: die gesamte App hat nur EINE Activity.
+ * Alle Screens werden als Composables in diese eine Activity gerendert.
+ * Die Navigation zwischen Screens übernimmt der NavController.
+ *
+ * ComponentActivity:
+ * - Basis-Klasse aus Jetpack, unterstützt Compose
+ * - onCreate() ist die erste Lifecycle-Methode die aufgerufen wird
+ *
+ * enableEdgeToEdge():
+ * - Lässt die App bis zum Bildschirmrand (Statusleiste/Navigationsleiste) zeichnen
+ * - Modernerer Look (kein dunkler Balken oben/unten)
+ *
+ * setContent { }:
+ * - Hier wird der Compose-UI-Baum übergeben (ersetzt das XML-Layout)
  */
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        // OSMDroid Karten-Konfiguration (Vermeidet Kachel-Ladefehler durch User-Agent Definition)
-        org.osmdroid.config.Configuration.getInstance().userAgentValue = "com.example.terun"
-        
-        // Ränder bis zum Bildschirmrand ausnutzen (Edge-to-Edge)
+
+        // Ränder bis zum Bildschirmrand nutzen (Edge-to-Edge Design)
         enableEdgeToEdge()
-        
-        // Compose-Layout mit benutzerdefiniertem TeRun-Design rendern
-        setContent { TeRunTheme { TeRunApp() } }
+
+        // Compose-UI starten mit dem TeRun-Theme (Farben, Typografie)
+        setContent {
+            TeRunTheme {
+                TeRunApp() // Einstiegspunkt der gesamten Compose-UI
+            }
+        }
     }
 }
 
 /**
- * TeRunApp — Zentraler Navigations-Graph der Anwendung.
- * Verwaltet alle Routen und stellt sicher, dass das SpielRepository als Singleton-Instanz geteilt wird.
+ * =====================================================================
+ * TeRunApp – Zentraler Navigations-Graph der Anwendung
+ * =====================================================================
+ *
+ * VORLESUNG 16 – Navigation:
+ * NavHost = der Container der alle Screens verwaltet
+ * NavController = steuert die Navigation (vorwärts/rückwärts)
+ *
+ * Ablauf:
+ * 1. Benutzer öffnet App → LoginRoute (Willkommensscreen)
+ * 2. Tippen auf "Anmelden" → SignInRoute
+ * 3. Tippen auf "Registrieren" → RegisterRoute
+ * 4. Nach erfolgreicher Anmeldung → HomeRoute (Hauptscreen)
+ *
+ * remember { SpielRepository(context) }:
+ * Das Repository wird einmal erstellt und für alle Screens geteilt.
+ * 'remember' sorgt dafür, dass es bei Recompositions nicht neu erstellt wird.
  */
 @Composable
 fun TeRunApp() {
     val context = LocalContext.current
-    // Repository wird hier deklariert und an alle Screens übergeben
+
+    // Repository einmal erstellen und für alle Screens teilen (Singleton in Compose)
     val repository = remember { SpielRepository(context) }
+
+    // NavController steuert die Navigation zwischen den Screens
     val navController = rememberNavController()
 
+    // NavHost definiert alle verfügbaren Routen (Screens) der App
     NavHost(navController = navController, startDestination = LoginRoute) {
 
-        // 1. Willkommensscreen (Login / Register Auswahl)
+        // Screen 1: Willkommensscreen (Login oder Register auswählen)
         composable<LoginRoute> {
             LoginScreen(
                 onSignInClicked = { navController.navigate(SignInRoute) },
@@ -59,7 +110,7 @@ fun TeRunApp() {
             )
         }
 
-        // 2. Anmelde-Screen (SignIn)
+        // Screen 2: Anmeldescreen (E-Mail + Passwort)
         composable<SignInRoute> {
             SignInScreen(
                 repository = repository,
@@ -68,7 +119,7 @@ fun TeRunApp() {
             )
         }
 
-        // 3. Registrierungs-Screen (Register)
+        // Screen 3: Registrierungsscreen (neues Konto erstellen)
         composable<RegisterRoute> {
             RegisterScreen(
                 repository = repository,
@@ -77,14 +128,17 @@ fun TeRunApp() {
             )
         }
 
-        // 4. Hauptbildschirm (Karte & Spiel-Steuerung)
+        // Screen 4: Hauptscreen (Karte, Duelle, Profil)
         composable<HomeRoute> {
-            KarteScreen(onLogout = {
-                // Bei Logout wird der gesamte Backstack gelöscht, um unbefugten Rückweg zu sperren
-                navController.navigate(LoginRoute) {
-                    popUpTo(HomeRoute) { inclusive = true }
+            KarteScreen(
+                onLogout = {
+                    // Beim Logout: kompletten Backstack löschen (HomeRoute inkl.)
+                    // Verhindert, dass der Benutzer mit "Zurück" wieder auf den Homescreen kommt
+                    navController.navigate(LoginRoute) {
+                        popUpTo(HomeRoute) { inclusive = true }
+                    }
                 }
-            })
+            )
         }
     }
 }

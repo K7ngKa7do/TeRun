@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "123456789012",
-    "project_id": "terun-app-production",
-    "storage_bucket": "terun-app-production.appspot.com"
+    "project_number": "727251866088",
+    "project_id": "terun-b5caf",
+    "storage_bucket": "terun-b5caf.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:123456789012:android:abcdef1234567890",
+        "mobilesdk_app_id": "1:727251866088:android:55a647ce92c021cc59d45d",
         "android_client_info": {
           "package_name": "com.example.terun"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDummyKeyForCompilationOnly"
+          "current_key": "AIzaSyCsFCAAhBD3fEQP-KK1vvY1xrYjlwpAvfI"
         }
       ],
       "services": {

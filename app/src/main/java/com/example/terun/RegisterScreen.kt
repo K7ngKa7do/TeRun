@@ -279,9 +279,10 @@ fun RegisterScreen(
                         return@Button
                     }
                     coroutineScope.launch {
-                        val result = repository.registrieren(email.trim(), spielername.trim(), password)
+                        val cleanedEmail = email.replace(" ", "")
+                        val result = repository.registrieren(cleanedEmail, spielername.trim(), password)
                         if (result.isSuccess) {
-                            val loggedInEmail = result.getOrNull() ?: email.trim()
+                            val loggedInEmail = result.getOrNull() ?: cleanedEmail
                             repository.setAccountKey(loggedInEmail)
                             repository.speichereSpielerName(spielername.trim())
                             Toast.makeText(context, "Konto erfolgreich erstellt!", Toast.LENGTH_SHORT).show()

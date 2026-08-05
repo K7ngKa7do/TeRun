@@ -10,32 +10,62 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * NetworkMonitor — Überwacht die Netzwerkverbindung in Echtzeit (basiert auf VL 11: Wireless Networks).
- * Nutzt den modernen ConnectivityManager.NetworkCallback statt des veralteten NetworkInfo,
- * um Batterieladung zu schonen und Reaktivität zu erhöhen. Exponiert den On-/Offline-Status als Flow.
+ * =====================================================================
+ * NetworkMonitor – Echtzeit-Überwachung der Netzwerkverbindung
+ * =====================================================================
+ *
+ * VORLESUNG 48 – Strategien für Datentransfer (Data Strategies):
+ * Eine "Offline-First"-App funktioniert auch ohne Internet (durch lokale Daten),
+ * synchronisiert aber sobald wieder eine Verbindung besteht.
+ *
+ * Diese Klasse erkennt in Echtzeit, ob das Gerät online oder offline ist.
+ * Sobald das Gerät wieder online geht, kann die App automatisch synchronisieren
+ * (WorkManager wird dann gestartet → VL 27).
+ *
+ * Moderner Ansatz mit ConnectivityManager.NetworkCallback:
+ * - Android empfiehlt diesen Ansatz statt des veralteten BroadcastReceivers (VL 39)
+ * - Der NetworkCallback wird vom System aufgerufen sobald sich der Netzwerkstatus ändert
+ * - Spart Batterielaufzeit im Vergleich zu regelmäßigem Pollen (aktives Abfragen)
+ *
+ * StateFlow (Kotlin Coroutines):
+ * - Hält den aktuellen Online-Status als beobachtbaren Wert
+ * - Composables und das Repository können diesen Wert live beobachten
+ * - MutableStateFlow = intern veränderbar, nach außen nur lesbar (asStateFlow)
  */
 class NetworkMonitor(context: Context) {
+
+    // System-Service für Netzwerkabfragen
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
+    // Interner (veränderbarer) Online-Status → wird vom NetworkCallback aktualisiert
     private val _isOnline = MutableStateFlow(false)
+
+    // Öffentlicher (nur lesbarer) Online-Status für andere Klassen (Repository, ViewModel)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
     init {
-        // Initialen Status beim Erstellen ermitteln
+        // Beim Erstellen den aktuellen Status sofort ermitteln (nicht warten)
         _isOnline.value = checkCurrentlyOnline()
 
+        // Netzwerk-Anforderung definieren: Wir wollen über jede Verbindung MIT Internet benachrichtigt werden
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()
 
         try {
+            // NetworkCallback beim System anmelden
+            // → onAvailable() wird aufgerufen wenn Netzwerk verbunden wird
+            // → onLost() wird aufgerufen wenn Netzwerk getrennt wird
             connectivityManager.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
+
                 override fun onAvailable(network: Network) {
+                    // Gerät ist wieder online
                     _isOnline.value = true
                 }
 
                 override fun onLost(network: Network) {
+                    // Netzwerk verloren → erneut prüfen ob noch eine andere Verbindung aktiv ist
                     _isOnline.value = checkCurrentlyOnline()
                 }
             })
@@ -44,7 +74,10 @@ class NetworkMonitor(context: Context) {
         }
     }
 
-    // Hilfsfunktion zur Ermittlung des aktuellen Status
+    /**
+     * Prüft ob das Gerät gerade eine aktive Internetverbindung hat.
+     * Gibt true zurück wenn ja, false wenn keine Verbindung besteht.
+     */
     private fun checkCurrentlyOnline(): Boolean {
         val activeNetwork = connectivityManager.activeNetwork ?: return false
         val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false

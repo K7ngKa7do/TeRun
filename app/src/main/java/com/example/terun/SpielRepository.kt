@@ -16,59 +16,78 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
 /**
- * SpielRepository — Datenschicht der App.
- * Kapselt den gesamten Datenzugriff: Room-Datenbank (DAO) und SharedPreferences (PreferencesManager).
- * Das ViewModel kennt nur das Repository, nie direkt DAO oder Prefs.
+ * =====================================================================
+ * SpielRepository – Datenschicht der App (MVVM-Model)
+ * =====================================================================
+ *
+ * VORLESUNG 18 – MVVM (Model-View-ViewModel):
+ * Das Repository ist die unterste Schicht im MVVM-Muster – das "Model".
+ * Es ist die einzige Stelle, die direkt auf Datenquellen zugreift.
+ * Das ViewModel kennt NUR das Repository, nie direkt DAO, Prefs oder Firebase.
+ *
+ * Dieses Repository verwaltet DREI Datenquellen:
+ * 1. Room-Datenbank (SQLite) – lokale, persistente Speicherung (VL 33–36)
+ * 2. SharedPreferences – einfache Schlüssel-Wert-Paare (VL 32)
+ * 3. Firebase Auth + Firestore – cloudbasierte Authentifizierung und Datenbank (VL 46)
+ *
+ * VORLESUNG 48 – Data Strategies (Offline-First):
+ * Die App arbeitet nach dem Offline-First-Prinzip:
+ * - Daten werden zuerst lokal (Room) gespeichert
+ * - Sobald Netzwerk verfügbar ist, werden sie mit Firestore synchronisiert
+ * - WorkManager erledigt die Synchronisation im Hintergrund (VL 27)
+ *
+ * VORLESUNG 30 – Dispatcher:
+ * Alle Datenbankoperationen laufen mit withContext(Dispatchers.IO),
+ * damit der Haupt-UI-Thread nicht blockiert wird.
  */
 class SpielRepository(private val context: Context) {
 
-    val dao = TeRunDatabase.getDatabase(context).teRunDao() // Datenbankzugriffsobjekt (public für SyncWorker)
-    private val prefs = PreferencesManager(context)                 // SharedPreferences-Wrapper
-    val networkMonitor = NetworkMonitor(context)            // Verbindungssensor
+    // DAO: Datenbankzugriffsobjekt für Room (public damit TeRunSyncWorker darauf zugreifen kann)
+    val dao = TeRunDatabase.getDatabase(context).teRunDao()
+    // Wrapper für SharedPreferences-Zugriffe (Key-Value Speicherung, VL 32)
+    private val prefs = PreferencesManager(context)
+    // Netzwerk-Monitor: erkennt ob Gerät online oder offline ist (VL 48)
+    val networkMonitor = NetworkMonitor(context)
+    // Firebase Firestore Datenbank (lazy = wird erst beim ersten Zugriff erzeugt)
     val firestore: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
 
     init {
-        // Automatisch synchronisieren sobald das Gerät online geht (VL 11: Data Strategies)
+        // Wenn das Gerät von offline auf online wechselt: Offline-Sync starten (VL 48 – Data Strategies)
+        // collect { } = Coroutine-Operator: hört permanent auf Änderungen des NetworkMonitor StateFlow
         CoroutineScope(Dispatchers.IO).launch {
             networkMonitor.isOnline.collect { online ->
                 if (online) {
-                    scheduleOfflineSync()
+                    scheduleOfflineSync() // WorkManager-Job starten (VL 27)
                 }
-            }
-        }
-
-        // Testdaten (User1, User2, User3) automatisch anlegen, falls die DB zurückgesetzt wurde
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                if (dao.getBenutzerByEmail("user1@TeRun.de") == null) {
-                    dao.insertBenutzer(BenutzerEntity("user1@TeRun.de", "user1", "Passwort123."))
-                }
-                if (dao.getBenutzerByEmail("user2@TeRun.de") == null) {
-                    dao.insertBenutzer(BenutzerEntity("user2@TeRun.de", "user2", "Passwort123."))
-                }
-                if (dao.getBenutzerByEmail("user3@TeRun.de") == null) {
-                    dao.insertBenutzer(BenutzerEntity("user3@TeRun.de", "user3", "Passwort123."))
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
         }
     }
 
-    // Plant eine Hintergrund-Synchronisation mit WorkManager ein
+    /**
+     * Offline-Synchronisation mit WorkManager planen (VL 27 – WorkManager).
+     * Erstellt eine einmalige Hintergrundaufgabe (OneTimeWorkRequest) die
+     * nur ausgeführt wird wenn eine Netzwerkverbindung besteht.
+     *
+     * ExistingWorkPolicy.KEEP:
+     * Falls bereits ein Sync-Job läuft, wird kein weiterer hinzugefügt.
+     * Verhindert doppelte Synchronisationen wenn das Netzwerk schnell wechselt.
+     */
     fun scheduleOfflineSync() {
+        // Bedingung: nur wenn Netzwerk verfügbar ist (laut VL 27-Beispiel)
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
+        // Einmalige Arbeitsanfrage für TeRunSyncWorker erstellen
         val workRequest = OneTimeWorkRequestBuilder<TeRunSyncWorker>()
             .setConstraints(constraints)
             .build()
 
         try {
+            // Beim System einreihen: eindeutiger Name verhindert doppelte Jobs
             WorkManager.getInstance(context).enqueueUniqueWork(
                 "TeRunOfflineSync",
-                ExistingWorkPolicy.KEEP,
+                ExistingWorkPolicy.KEEP, // Nicht ersetzen wenn bereits läuft
                 workRequest
             )
         } catch (e: Exception) {
@@ -84,7 +103,13 @@ class SpielRepository(private val context: Context) {
         return map
     }
 
-    // Synchronisiert lokale Duelle und Profile mit dem Server (VL 11 / Data Strategies)
+    /**
+     * Alle lokal gespeicherten Duelle und das Profil mit Firestore hochladen.
+     * Wird vom TeRunSyncWorker aufgerufen (VL 48 – Batching-Strategie):
+     * "Daten zuerst lokal speichern, dann als Block hochladen wenn Netzwerk verfügbar"
+     *
+     * withContext(Dispatchers.IO): läuft auf dem IO-Thread (kein UI-Thread blockiert, VL 30)
+     */
     suspend fun synchronisiereLokaleDaten() = withContext(Dispatchers.IO) {
         val localDuelle = dao.getAlleDuelle().map { it.toDuell() }
         for (duell in localDuelle) {
@@ -116,19 +141,37 @@ class SpielRepository(private val context: Context) {
     }
 
     // ==========================================================================
-    // Account
+    // Authentifizierung (Firebase Auth + Room Offline-Fallback) – VL 46
     // ==========================================================================
 
+    // Firebase Auth Instanz (lazy = erst beim ersten Zugriff initialisiert)
     private val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance() }
 
-    // Firebase-Anmeldung mit Fallback auf lokale SQLite-Datenbank (Room)
+    /**
+     * Benutzer mit E-Mail und Passwort anmelden.
+     *
+     * VORLESUNG 46 – Firebase:
+     * Firebase Auth erledigt die Sicherheit im Hintergrund (Passwort-Hash, Token-Verwaltung).
+     * Wir rufen nur signInWithEmailAndPassword() auf – Firebase macht den Rest.
+     *
+     * Offline-Fallback (VL 48 – Data Strategies):
+     * Falls Firebase nicht erreichbar ist (kein Internet / falscher API-Key),
+     * prüft die App das Passwort gegen die lokale Room-Datenbank.
+     * So kann der Spieler auch offline spielen.
+     *
+     * suspendCancellableCoroutine:
+     * Wandelt den Firebase-Callback (addOnCompleteListener) in eine Coroutine um.
+     * So kann das Repository await-artig auf das Firebase-Ergebnis warten
+     * ohne den UI-Thread zu blockieren.
+     */
     suspend fun anmelden(email: String, passwort: String): Result<String> {
+        val cleanEmail = email.trim().lowercase()
         val result = try {
             suspendCancellableCoroutine<Result<String>> { continuation ->
-                auth.signInWithEmailAndPassword(email, passwort)
+                auth.signInWithEmailAndPassword(cleanEmail, passwort)
                     .addOnCompleteListener { task ->
                         if (task.isSuccessful) {
-                            continuation.resume(Result.success(auth.currentUser?.email ?: email))
+                            continuation.resume(Result.success(auth.currentUser?.email ?: cleanEmail))
                         } else {
                             val exception = task.exception ?: Exception("Anmeldung fehlgeschlagen")
                             continuation.resume(Result.failure(exception))
@@ -142,25 +185,40 @@ class SpielRepository(private val context: Context) {
         // Falls Firebase fehlschlägt (z. B. wegen ungültigem API-Key oder fehlender Internetverbindung),
         // führen wir den Offline-Fallback auf die lokale Room-DB aus.
         return if (result.isFailure) {
-            val lokalerUser = holeBenutzer(email)
-            if (lokalerUser != null && lokalerUser.passwort == passwort) {
-                Result.success(email)
+            val lokalerUser = holeBenutzer(cleanEmail)
+            if (lokalerUser != null) {
+                if (lokalerUser.passwort == passwort) {
+                    Result.success(cleanEmail)
+                } else {
+                    Result.failure(Exception("WRONG_PASSWORD"))
+                }
             } else {
-                result // Originalen Firebase-Fehler zurückgeben, wenn auch lokal nicht vorhanden
+                Result.failure(Exception("USER_NOT_FOUND"))
             }
         } else {
             result
         }
     }
 
-    // Firebase-Registrierung mit lokaler Spiegelung & Fallback
+    /**
+     * Neues Konto mit E-Mail, Spielername und Passwort erstellen.
+     *
+     * VORLESUNG 46 – Firebase:
+     * Firebase erstellt das Konto im Authentifizierungs-Backend.
+     * Zusätzlich wird der Spieler in Room (lokal) und Firestore (cloud) gespeichert.
+     *
+     * Offline-Fallback:
+     * Falls Firebase nicht erreichbar, wird der Benutzer nur lokal gespeichert.
+     * Bei nächster Verbindung synchronisiert der SyncWorker die Daten (VL 27 + VL 48).
+     */
     suspend fun registrieren(email: String, name: String, passwort: String): Result<String> {
+        val cleanEmail = email.trim().lowercase()
         val result = try {
             suspendCancellableCoroutine<Result<String>> { continuation ->
-                auth.createUserWithEmailAndPassword(email, passwort)
+                auth.createUserWithEmailAndPassword(cleanEmail, passwort)
                     .addOnCompleteListener { task ->
                         if (task.isSuccessful) {
-                            continuation.resume(Result.success(auth.currentUser?.email ?: email))
+                            continuation.resume(Result.success(auth.currentUser?.email ?: cleanEmail))
                         } else {
                             val exception = task.exception ?: Exception("Registrierung fehlgeschlagen")
                             continuation.resume(Result.failure(exception))
@@ -173,24 +231,28 @@ class SpielRepository(private val context: Context) {
 
         return if (result.isFailure) {
             // Offline/Fallback: Lokal in Room registrieren
-            val existing = holeBenutzer(email)
+            val existing = holeBenutzer(cleanEmail)
             if (existing != null) {
-                Result.failure(Exception("Benutzer existiert bereits lokal!"))
+                Result.failure(Exception("USER_ALREADY_EXISTS"))
             } else {
-                val lokalerUser = BenutzerEntity(email, name, passwort)
+                val lokalerUser = BenutzerEntity(cleanEmail, name, passwort)
                 speichereBenutzer(lokalerUser)
-                Result.success(email)
+                Result.success(cleanEmail)
             }
         } else {
             if (result.isSuccess) {
-                speichereBenutzer(BenutzerEntity(email, name, passwort))
-                speichereProfilFirestore(email, name)
+                speichereBenutzer(BenutzerEntity(cleanEmail, name, passwort))
+                speichereProfilFirestore(cleanEmail, name)
             }
             result
         }
     }
 
-    // Profildaten in Firestore synchronisieren (Name, Distanz, Duelle)
+    /**
+     * Profildaten (Name, Distanz, Duellanzahl) in Firestore hochladen.
+     * Wird nach jeder Profiländerung aufgerufen (Name, Statistiken).
+     * Kein Update wenn offline (networkMonitor.isOnline.value = false).
+     */
     fun speichereProfilFirestore(email: String, name: String) {
         if (!networkMonitor.isOnline.value) return
         val userMap = mapOf(
@@ -266,17 +328,26 @@ class SpielRepository(private val context: Context) {
     fun getAccountKey(): String = prefs.getAccountKey()
 
     // ==========================================================================
-    // Profil
+    // Profil-Verwaltung (SharedPreferences + Room, VL 32 + VL 35)
     // ==========================================================================
 
-    // Anzeigenamen des aktuell eingeloggten Spielers laden
-    // Fallback: E-Mail-Präfix (z.B. "max" aus "max@mail.de") wenn kein Name gesetzt
+    /**
+     * Anzeigenamen des eingeloggten Spielers laden.
+     * Quelle: SharedPreferences (VL 32) – schnell, kein Hintergrundthread nötig.
+     * Fallback: E-Mail-Präfix wenn noch kein Name gespeichert ist (z.B. "max" aus "max@test.de")
+     */
     fun ladeSpielerName(): String {
         val key = prefs.getAccountKey()
         return if (key.isBlank()) "Spieler" else prefs.getDisplayName(key, key.substringBefore("@"))
     }
 
-    // Anzeigenamen in SharedPreferences und Room-DB aktualisieren
+    /**
+     * Anzeigenamen ändern und sofort dreifach persistieren:
+     * 1. SharedPreferences (lokal, sofort verfügbar)
+     * 2. Room-Datenbank (SQLite, persistent nach Neustart)
+     * 3. Firestore (cloud, für andere Spieler sichtbar)
+     * Punkt 2+3 laufen im IO-Thread (CoroutineScope + Dispatchers.IO, VL 30)
+     */
     fun speichereSpielerName(name: String) {
         val key = prefs.getAccountKey()
         if (key.isNotBlank()) {
@@ -296,10 +367,11 @@ class SpielRepository(private val context: Context) {
     fun speichereAbsolvierteDuelleCount(count: Int) = prefs.saveAbsolvierteDuelleCount(count)
 
     // ==========================================================================
-    // Duelle
+    // Duell-Verwaltung (Room + Firestore, VL 33–36 + VL 46)
     // ==========================================================================
 
-    // Alle Duelle vom Server abrufen
+    // Alle Duelle vom Firestore-Server laden
+    // Filtert nur Duelle bei denen der Spieler Ersteller oder Gegner ist
     suspend fun ladeDuelleVomServer(): List<Duell> = withContext(Dispatchers.IO) {
         if (!networkMonitor.isOnline.value) return@withContext emptyList()
         try {
@@ -586,10 +658,16 @@ class SpielRepository(private val context: Context) {
             // 1. Lokale DB auf existierende Verbindung prüfen
             val lokaleFreundschaft = dao.getFreundschaft(ownerEmail, friendEmail)
             if (lokaleFreundschaft != null) {
-                return@withContext if (lokaleFreundschaft.status == "ACCEPTED") {
-                    "ALREADY_FRIENDS"
-                } else {
-                    "ALREADY_SENT"
+                return@withContext when (lokaleFreundschaft.status) {
+                    "ACCEPTED" -> "ALREADY_FRIENDS"
+                    "SENT_PENDING" -> "ALREADY_SENT"
+                    "RECEIVED_PENDING" -> {
+                        // Wenn der andere User mir bereits eine Anfrage geschickt hat, nehmen wir diese automatisch an
+                        val otherName = friendUser.name
+                        antworteAufFreundesanfrage(ownerEmail, otherName, akzeptiert = true)
+                        "SUCCESS"
+                    }
+                    else -> "ALREADY_SENT"
                 }
             }
 
@@ -614,7 +692,7 @@ class SpielRepository(private val context: Context) {
                             dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = ownerEmail, status = "ACCEPTED"))
                             "ALREADY_FRIENDS"
                         } else {
-                            dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "PENDING"))
+                            dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
                             "ALREADY_SENT"
                         }
                     }
@@ -625,7 +703,7 @@ class SpielRepository(private val context: Context) {
 >>>>>>> fa46e4070c4f87a2a24c034715166cfa82994dac
 
             // Lokalen Eintrag als PENDING speichern
-            dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "PENDING"))
+            dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
 
             if (networkMonitor.isOnline.value) {
                 try {
@@ -682,7 +760,7 @@ class SpielRepository(private val context: Context) {
 
             for ((senderEmail, senderName) in pendingSenders) {
                 dao.insertBenutzer(BenutzerEntity(senderEmail, senderName, ""))
-                dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = senderEmail, status = "PENDING"))
+                dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = senderEmail, status = "RECEIVED_PENDING"))
             }
 
             pendingSenders.map { it.second }
@@ -715,7 +793,7 @@ class SpielRepository(private val context: Context) {
                 }
             }
         } else {
-            dao.deleteFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = senderEmail, status = "PENDING"))
+            dao.deleteFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = senderEmail, status = "RECEIVED_PENDING"))
 
             if (networkMonitor.isOnline.value) {
                 try {
@@ -797,32 +875,48 @@ class SpielRepository(private val context: Context) {
     fun translateAuthError(exception: Throwable?): String {
         val msg = exception?.message ?: ""
         return when {
-            msg.contains("API key not valid", ignoreCase = true) ||
-            msg.contains("Please pass a valid API key", ignoreCase = true) -> {
-                "Falsche E-Mail/Passwort oder Benutzer noch nicht registriert!"
-            }
-            msg.contains("no user record", ignoreCase = true) ||
-            msg.contains("user-not-found", ignoreCase = true) -> {
-                "Benutzer noch nicht registriert oder falsche E-Mail!"
-            }
+            // Präzise Fehlercodes aus lokalem Fallback oder Firebase-Exceptions
+            msg.contains("WRONG_PASSWORD", ignoreCase = true) ||
             msg.contains("wrong-password", ignoreCase = true) ||
             msg.contains("password is invalid", ignoreCase = true) -> {
-                "Falsches Passwort!"
+                "Das eingegebene Passwort ist falsch!"
             }
-            msg.contains("invalid-email", ignoreCase = true) ||
-            msg.contains("email address is badly formatted", ignoreCase = true) -> {
-                "Ungültiges E-Mail-Format!"
+
+            msg.contains("USER_NOT_FOUND", ignoreCase = true) ||
+            msg.contains("no user record", ignoreCase = true) ||
+            msg.contains("user-not-found", ignoreCase = true) -> {
+                "Diese E-Mail-Adresse ist noch nicht registriert!"
             }
+
+            msg.contains("USER_ALREADY_EXISTS", ignoreCase = true) ||
             msg.contains("email already in use", ignoreCase = true) ||
             msg.contains("email-already-in-use", ignoreCase = true) -> {
-                "Diese E-Mail-Adresse wird bereits verwendet!"
+                "Diese E-Mail-Adresse ist bereits registriert!"
             }
+
+            msg.contains("invalid-email", ignoreCase = true) ||
+            msg.contains("email address is badly formatted", ignoreCase = true) -> {
+                "Das E-Mail-Format ist ungültig (z.B. @ fehlt)!"
+            }
+
             msg.contains("network-request-failed", ignoreCase = true) ||
-            msg.contains("network error", ignoreCase = true) -> {
+            msg.contains("network error", ignoreCase = true) ||
+            msg.contains("ssl", ignoreCase = true) ||
+            msg.contains("i/o error", ignoreCase = true) ||
+            msg.contains("connection reset", ignoreCase = true) ||
+            msg.contains("socket", ignoreCase = true) -> {
                 "Netzwerkfehler! Bitte überprüfe deine Internetverbindung."
             }
+
+            msg.contains("API key not valid", ignoreCase = true) ||
+            msg.contains("Please pass a valid API key", ignoreCase = true) -> {
+                // Wenn Firebase-API ungültig ist, aber wir keinen lokalen User in Room haben
+                "Diese E-Mail-Adresse ist noch nicht registriert!"
+            }
+
             else -> {
-                "Falsche E-Mail/Passwort oder Benutzer noch nicht registriert!"
+                // Generischer, aber verständlicher Text
+                "Ungültige E-Mail-Adresse oder Passwort falsch!"
             }
         }
     }

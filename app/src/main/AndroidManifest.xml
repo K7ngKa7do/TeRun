@@ -2,10 +2,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Internetzugang für Firebase (Authentifizierung + Firestore Datenbankzugriff) -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- GPS-Ortung: ACCESS_FINE_LOCATION = genauer Standort (GPS), Pflicht für Duell-Tracking (VL 43) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!-- Foreground Service darf im Hintergrund laufen (VL 25 – Services) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <!-- Spezieller Typ: dieser Foreground Service greift auf den Standort zu (Android 10+) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+    <!-- Benachrichtigungen senden (ab Android 13 / API 33 Pflicht – VL 41 Notifications) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="true"
@@ -16,6 +26,11 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.TeRun">
+
+        <!-- Google Maps API Key (Maps SDK for Android) -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyCBn6UZ2-1P4yRkQZ_fr0nKJK3tpHS3Z-s"/>
 
         <service
             android:name=".TeRunLocationService"

@@ -186,9 +186,10 @@ fun SignInScreen(
                         return@Button
                     }
                     coroutineScope.launch {
-                        val result = repository.anmelden(email.trim(), password)
+                        val cleanedEmail = email.replace(" ", "")
+                        val result = repository.anmelden(cleanedEmail, password)
                         if (result.isSuccess) {
-                            val loggedInEmail = result.getOrNull() ?: email.trim()
+                            val loggedInEmail = result.getOrNull() ?: cleanedEmail
                             repository.setAccountKey(loggedInEmail)
                             
                             // Profil von Firestore synchronisieren (Name + Statistiken)

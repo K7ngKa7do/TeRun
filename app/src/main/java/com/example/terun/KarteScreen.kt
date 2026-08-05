@@ -4,12 +4,11 @@
 // Quelle: moco202613composablesmodifier.pdf — Modifier-Verwendung (weight, padding, background, shape, verticalScroll)
 // Quelle: moco202614recompositionstates.pdf — Statusverwaltung mit remember und mutableStateOf
 // Quelle: moco202618mvvm.pdf — MVVM mit ViewModel zur Trennung von UI und Spiellogik
-// Quelle: moco202640permissions.pdf — Berechtigungen und GPS-Ortung über AndroidView mit OSMDroid
+// Quelle: moco202640permissions.pdf — Berechtigungen und GPS-Ortung über Google Maps
 
 package com.example.terun
 
 import android.Manifest
-import android.content.Context
 import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -41,17 +40,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import org.osmdroid.config.Configuration
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.Marker
-import org.osmdroid.views.overlay.Polyline
-import org.osmdroid.views.overlay.compass.CompassOverlay
-import org.osmdroid.views.overlay.compass.InternalCompassOrientationProvider
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.rememberCameraPositionState
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -87,9 +87,10 @@ fun KarteScreen(
     // Dialog-Status zur Auswahl eines Duells vor dem Start
     var showSelectDuelDialog by remember { mutableStateOf(false) }
 
-    // Steuerung der Kartenzentrierung: true = Benutzer hat geschoben, false = zentriere auf Spieler
-    var hasCenteredMap by remember { mutableStateOf(false) }
-    var mainMapInstance by remember { mutableStateOf<MapView?>(null) }
+    // Kamera-State für die Hauptkarte (Google Maps Compose)
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(LatLng(50.9348, 6.9852), 17f)
+    }
 
     // Standort-Updates starten, sobald der Screen geladen wird und die Berechtigung erteilt ist
     LaunchedEffect(Unit) {
@@ -176,156 +177,87 @@ fun KarteScreen(
                                 .weight(1f)
                                 .background(MapDark)
                         ) {
-                            // Integration der echten OSMDroid OpenStreetMap-Karte
-                            AndroidView(
-                                factory = { ctx ->
-                                    Configuration.getInstance().load(
-                                        ctx,
-                                        ctx.getSharedPreferences("osm_prefs", Context.MODE_PRIVATE)
+                            // Integration der Google Maps Karte (ersetzt OSMDroid)
+                            val gpsPos = viewModel.spielerPosition
+
+                            // Kamera automatisch auf Spielerposition zentrieren (einmalig)
+                            LaunchedEffect(gpsPos) {
+                                if (gpsPos != null) {
+                                    cameraPositionState.animate(
+                                        CameraUpdateFactory.newLatLngZoom(gpsPos, 17f)
                                     )
-                                    MapView(ctx).apply {
-                                        setTileSource(TileSourceFactory.MAPNIK)
-                                        setMultiTouchControls(true)
-                                        setBuiltInZoomControls(false)
-                                        controller.setZoom(17.5)
-                                        minZoomLevel = 4.0
-                                        maxZoomLevel = 21.0
+                                }
+                            }
 
-                                        // Compass needle overlay
-                                        val compass = CompassOverlay(ctx, InternalCompassOrientationProvider(ctx), this).apply {
-                                            enableCompass()
-                                        }
-                                        overlays.add(compass)
+                            GoogleMap(
+                                modifier = Modifier.fillMaxSize(),
+                                cameraPositionState = cameraPositionState,
+                                properties = MapProperties(isMyLocationEnabled = false),
+                                uiSettings = MapUiSettings(
+                                    zoomControlsEnabled = false,
+                                    myLocationButtonEnabled = false
+                                )
+                            ) {
+                                // 1. Eigener Spieler-Marker
+                                val playerPos = viewModel.spielerPosition
+                                if (playerPos != null) {
+                                    Marker(
+                                        state = MarkerState(position = playerPos),
+                                        title = viewModel.spielerName,
+                                        snippet = "Deine Position",
+                                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+                                    )
+                                }
 
-                                        mainMapInstance = this
-                                    }
-                                },
-                                update = { mapView ->
-                                    mapView.overlays.clear()
-
-                                    // Retain compass overlay during updates
-                                    val compass = CompassOverlay(context, InternalCompassOrientationProvider(context), mapView).apply {
-                                        enableCompass()
-                                    }
-                                    mapView.overlays.add(compass)
-
-                                    val gpsPos = viewModel.spielerPosition
-                                    if (gpsPos != null && !hasCenteredMap) {
-                                        mapView.controller.setCenter(gpsPos)
-                                        hasCenteredMap = true
-                                    } else if (gpsPos == null && !hasCenteredMap) {
-                                        mapView.controller.setCenter(GeoPoint(50.9348, 6.9852))
-                                    }
-
-                                    val currentPos = gpsPos ?: GeoPoint(50.9348, 6.9852)
-
-                                    // 1. Eigener Spieler-Marker auf der Karte
-                                    val playerMarker = Marker(mapView).apply {
-                                        position = currentPos
-                                        title = viewModel.spielerName
-                                        icon = createUserLocationDot(context)
-                                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                                    }
-                                    mapView.overlays.add(playerMarker)
-
-                                    val active = viewModel.aktivesDuell
-                                    if (duellLaeuft && active != null) {
-                                        // 2. Ziel-Beacon (Startpunkt des Duells)
-                                        val finishPos = viewModel.startPositionGeo ?: GeoPoint(50.9348, 6.9852)
-                                        val finishMarker = Marker(mapView).apply {
-                                            position = finishPos
-                                            title = "Ziel-Beacon (Startort)"
-                                            icon = ContextCompat.getDrawable(context, android.R.drawable.ic_menu_myplaces)
-                                        }
-                                        mapView.overlays.add(finishMarker)
-
-                                        // 2.5 Gegner-Marker auf der Karte zeichnen (roter maps-style Dot)
-                                        for ((gegnerName, statePair) in viewModel.gegnerStati) {
-                                            val gegnerPos = statePair.first
-                                            val enemyMarker = Marker(mapView).apply {
-                                                position = gegnerPos
-                                                title = "$gegnerName (${statePair.second} Spots)"
-                                                icon = createEnemyLocationDot(context)
-                                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                                            }
-                                            mapView.overlays.add(enemyMarker)
-                                        }
-
-                                        val count = active.spotsAnzahl
-                                        // 3. Spots mit sich farblich ändernden Icons zeichnen
-                                        if (count >= 1) {
-                                            val spot1Marker = Marker(mapView).apply {
-                                                position = GeoPoint(active.spot1Lat, active.spot1Lng)
-                                                title = "Spot 1"
-                                                icon = ContextCompat.getDrawable(
-                                                    context,
-                                                    if (viewModel.spot1Captured) R.drawable.ic_flag_captured
-                                                    else R.drawable.ic_flag_uncaptured
-                                                )
-                                            }
-                                            mapView.overlays.add(spot1Marker)
-                                        }
-
-                                        if (count >= 2) {
-                                            val spot2Marker = Marker(mapView).apply {
-                                                position = GeoPoint(active.spot2Lat, active.spot2Lng)
-                                                title = "Spot 2"
-                                                icon = ContextCompat.getDrawable(
-                                                    context,
-                                                    if (viewModel.spot2Captured) R.drawable.ic_flag_captured
-                                                    else R.drawable.ic_flag_uncaptured
-                                                )
-                                            }
-                                            mapView.overlays.add(spot2Marker)
-                                        }
-
-                                        if (count >= 3) {
-                                            val spot3Marker = Marker(mapView).apply {
-                                                position = GeoPoint(active.spot3Lat, active.spot3Lng)
-                                                title = "Spot 3"
-                                                icon = ContextCompat.getDrawable(
-                                                    context,
-                                                    if (viewModel.spot3Captured) R.drawable.ic_flag_captured
-                                                    else R.drawable.ic_flag_uncaptured
-                                                )
-                                            }
-                                            mapView.overlays.add(spot3Marker)
-                                        }
-
-                                        if (count >= 4) {
-                                            val spot4Marker = Marker(mapView).apply {
-                                                position = GeoPoint(active.spot4Lat, active.spot4Lng)
-                                                title = "Spot 4"
-                                                icon = ContextCompat.getDrawable(
-                                                    context,
-                                                    if (viewModel.spot4Captured) R.drawable.ic_flag_captured
-                                                    else R.drawable.ic_flag_uncaptured
-                                                )
-                                            }
-                                            mapView.overlays.add(spot4Marker)
-                                        }
-
-                                        if (count >= 5) {
-                                            val spot5Marker = Marker(mapView).apply {
-                                                position = GeoPoint(active.spot5Lat, active.spot5Lng)
-                                                title = "Spot 5"
-                                                icon = ContextCompat.getDrawable(
-                                                    context,
-                                                    if (viewModel.spot5Captured) R.drawable.ic_flag_captured
-                                                    else R.drawable.ic_flag_uncaptured
-                                                )
-                                            }
-                                            mapView.overlays.add(spot5Marker)
-                                        }
-
-                                        // 4. Pfad-Verbindungslinie ist deaktiviert.
-                                        // Die Spieler müssen die Spots eigenständig ohne Führungslinie finden!
+                                val active = viewModel.aktivesDuell
+                                if (duellLaeuft && active != null) {
+                                    // 2. Ziel-Beacon (Startpunkt des Duells)
+                                    val finishPos = viewModel.startPositionGeo
+                                    if (finishPos != null) {
+                                        Marker(
+                                            state = MarkerState(position = finishPos),
+                                            title = "Ziel-Beacon (Startort)",
+                                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
+                                        )
                                     }
 
-                                    mapView.invalidate()
-                                },
-                                modifier = Modifier.fillMaxSize()
-                            )
+                                    // 2.5 Gegner-Marker (rot)
+                                    for ((gegnerName, statePair) in viewModel.gegnerStati) {
+                                        Marker(
+                                            state = MarkerState(position = statePair.first),
+                                            title = "$gegnerName (${statePair.second} Spots)",
+                                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
+                                        )
+                                    }
+
+                                    val count = active.spotsAnzahl
+                                    // 3. Spot-Marker mit Farbe je nach Status
+                                    val spotCoords = listOf(
+                                        LatLng(active.spot1Lat, active.spot1Lng),
+                                        LatLng(active.spot2Lat, active.spot2Lng),
+                                        LatLng(active.spot3Lat, active.spot3Lng),
+                                        LatLng(active.spot4Lat, active.spot4Lng),
+                                        LatLng(active.spot5Lat, active.spot5Lng)
+                                    )
+                                    val spotCaptured = listOf(
+                                        viewModel.spot1Captured,
+                                        viewModel.spot2Captured,
+                                        viewModel.spot3Captured,
+                                        viewModel.spot4Captured,
+                                        viewModel.spot5Captured
+                                    )
+                                    for (i in 0 until count) {
+                                        Marker(
+                                            state = MarkerState(position = spotCoords[i]),
+                                            title = "Spot ${i + 1}",
+                                            icon = BitmapDescriptorFactory.defaultMarker(
+                                                if (spotCaptured[i]) BitmapDescriptorFactory.HUE_GREEN
+                                                else BitmapDescriptorFactory.HUE_ORANGE
+                                            )
+                                        )
+                                    }
+                                }
+                            }
 
                             // Live Multiplayer-Scoreboard (Meilenstein 5)
                             val active = viewModel.aktivesDuell
@@ -356,6 +288,7 @@ fun KarteScreen(
                             }
 
                             // Karten-Steuerungsknöpfe auf der rechten Seite (Locate, Zoom In, Zoom Out)
+                            val coroutineScope = rememberCoroutineScope()
                             Column(
                                 modifier = Modifier
                                     .align(Alignment.CenterEnd)
@@ -365,9 +298,10 @@ fun KarteScreen(
                                 // 🎯 Zentrieren
                                 Button(
                                     onClick = {
-                                        val currentPos = viewModel.spielerPosition ?: GeoPoint(50.9348, 6.9852)
-                                        mainMapInstance?.controller?.animateTo(currentPos)
-                                        hasCenteredMap = true
+                                        val pos = viewModel.spielerPosition ?: LatLng(50.9348, 6.9852)
+                                        coroutineScope.launch {
+                                            cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(pos, 17f))
+                                        }
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = DarkBackground.copy(alpha = 0.9f)),
                                     shape = RoundedCornerShape(50.dp),
@@ -379,7 +313,11 @@ fun KarteScreen(
 
                                 // ➕ Zoom In
                                 Button(
-                                    onClick = { mainMapInstance?.controller?.zoomIn() },
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            cameraPositionState.animate(CameraUpdateFactory.zoomIn())
+                                        }
+                                    },
                                     colors = ButtonDefaults.buttonColors(containerColor = DarkBackground.copy(alpha = 0.9f)),
                                     shape = RoundedCornerShape(50.dp),
                                     contentPadding = PaddingValues(0.dp),
@@ -390,7 +328,11 @@ fun KarteScreen(
 
                                 // ➖ Zoom Out
                                 Button(
-                                    onClick = { mainMapInstance?.controller?.zoomOut() },
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            cameraPositionState.animate(CameraUpdateFactory.zoomOut())
+                                        }
+                                    },
                                     colors = ButtonDefaults.buttonColors(containerColor = DarkBackground.copy(alpha = 0.9f)),
                                     shape = RoundedCornerShape(50.dp),
                                     contentPadding = PaddingValues(0.dp),
@@ -440,7 +382,6 @@ fun KarteScreen(
                     DuelleTabContent(
                         viewModel = viewModel,
                         onNavigateToKarte = {
-                            hasCenteredMap = false // Automatisch zentrieren beim Wechseln zur Karte
                             aktiverTab = Tab.KARTE
                         }
                     )
@@ -590,7 +531,6 @@ fun KarteScreen(
                         }
                         Button(
                             onClick = {
-                                hasCenteredMap = false
                                 viewModel.duellStarten(duell)
                                 showSelectDuelDialog = false
                                 selectedDuelToInspect = null
@@ -781,8 +721,8 @@ fun ErgebnisZeile(
 @Composable
 fun DuellErstellenScreen(
     onDismiss: () -> Unit,
-    onSave: (name: String, zeitLimitMinuten: Int, spots: List<GeoPoint>, gegner: String) -> Unit,
-    spielerPosition: GeoPoint,
+    onSave: (name: String, zeitLimitMinuten: Int, spots: List<LatLng>, gegner: String) -> Unit,
+    spielerPosition: LatLng,
     currentUserName: String,
     searchUsers: suspend (String) -> List<String>
 ) {
@@ -794,13 +734,12 @@ fun DuellErstellenScreen(
     var minutenInput by remember { mutableStateOf("15") }
     
     var spotSearchInput by remember { mutableStateOf("") }
-    val addedSpots = remember { mutableStateListOf<Pair<String, GeoPoint>>() }
+    val addedSpots = remember { mutableStateListOf<Pair<String, LatLng>>() }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    var mapChooserInstance by remember { mutableStateOf<MapView?>(null) }
 
     // Dynamische Suchvorschläge von Nominatim
-    val dynamicSuggestions = remember { mutableStateListOf<Pair<Pair<String, String>, GeoPoint>>() }
+    val dynamicSuggestions = remember { mutableStateListOf<Pair<Pair<String, String>, LatLng>>() }
     var isSearching by remember { mutableStateOf(false) }
 
     // Live-Abfrage mit Debounce (500ms)
@@ -1059,9 +998,9 @@ fun DuellErstellenScreen(
                                     val query = spotSearchInput.trim()
                                     val foundList = searchPlacesNominatim(query)
                                     val bestGeo = foundList.firstOrNull()?.second ?: run {
-                                        val randomLat = spielerPosition.latitude + java.util.concurrent.ThreadLocalRandom.current().nextDouble(-0.001, 0.001)
-                                        val randomLng = spielerPosition.longitude + java.util.concurrent.ThreadLocalRandom.current().nextDouble(-0.001, 0.001)
-                                        GeoPoint(randomLat, randomLng)
+                                        val randomLat = (spielerPosition?.latitude ?: 50.9348) + java.util.concurrent.ThreadLocalRandom.current().nextDouble(-0.001, 0.001)
+                                        val randomLng = (spielerPosition?.longitude ?: 6.9852) + java.util.concurrent.ThreadLocalRandom.current().nextDouble(-0.001, 0.001)
+                                        LatLng(randomLat, randomLng)
                                     }
                                     addedSpots.add(query to bestGeo)
                                     Toast.makeText(context, "Spot '$query' hinzugefügt!", Toast.LENGTH_SHORT).show()
@@ -1134,7 +1073,7 @@ fun DuellErstellenScreen(
 
                 // Karte-Wählen Button & Dialog
                 var showMapChooser by remember { mutableStateOf(false) }
-                val mapSelectedSpots = remember { mutableStateListOf<Pair<String, GeoPoint>>() }
+                val mapSelectedSpots = remember { mutableStateListOf<Pair<String, LatLng>>() }
 
                 TeRunButton(
                     text = "📍 Ort auf Karte wählen",
@@ -1156,76 +1095,47 @@ fun DuellErstellenScreen(
                             color = DarkBackground
                         ) {
                             Box(modifier = Modifier.fillMaxSize()) {
-                                AndroidView(
-                                    factory = { ctx ->
-                                        MapView(ctx).apply {
-                                            setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
-                                            setMultiTouchControls(true)
-                                            setBuiltInZoomControls(false)
-                                            controller.setZoom(17.5)
-                                            controller.setCenter(spielerPosition)
+                                // Google Maps Karte für Spot-Auswahl
+                                val chooserCameraState = rememberCameraPositionState {
+                                    val startPos = spielerPosition ?: LatLng(50.9348, 6.9852)
+                                    position = CameraPosition.fromLatLngZoom(startPos, 17f)
+                                }
+                                val chooserScope = rememberCoroutineScope()
 
-                                            // Compass needle overlay
-                                            val compass = CompassOverlay(ctx, InternalCompassOrientationProvider(ctx), this).apply {
-                                                enableCompass()
-                                            }
-                                            overlays.add(compass)
-
-                                            mapChooserInstance = this
-                                        }
-                                    },
+                                GoogleMap(
                                     modifier = Modifier.fillMaxSize(),
-                                    update = { map ->
-                                        map.overlays.clear()
-
-                                        // Retain compass overlay during updates
-                                        val compass = CompassOverlay(context, InternalCompassOrientationProvider(context), map).apply {
-                                            enableCompass()
+                                    cameraPositionState = chooserCameraState,
+                                    properties = MapProperties(isMyLocationEnabled = false),
+                                    uiSettings = MapUiSettings(zoomControlsEnabled = false),
+                                    onMapClick = { latLng ->
+                                        if (mapSelectedSpots.size >= 5) {
+                                            Toast.makeText(context, "Maximal 5 Spots erlaubt!", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            val spotNumber = mapSelectedSpots.size + 1
+                                            mapSelectedSpots.add("Spot $spotNumber" to latLng)
                                         }
-                                        map.overlays.add(compass)
-
-                                        // Klick-Listener hinzufügen
-                                        val receiver = object : org.osmdroid.events.MapEventsReceiver {
-                                            override fun singleTapConfirmedHelper(p: org.osmdroid.util.GeoPoint): Boolean {
-                                                if (mapSelectedSpots.size >= 5) {
-                                                    Toast.makeText(context, "Maximal 5 Spots erlaubt!", Toast.LENGTH_SHORT).show()
-                                                } else {
-                                                    val spotNumber = mapSelectedSpots.size + 1
-                                                    mapSelectedSpots.add("Spot $spotNumber" to GeoPoint(p.latitude, p.longitude))
-                                                }
-                                                return true
-                                            }
-                                            override fun longPressHelper(p: org.osmdroid.util.GeoPoint): Boolean {
-                                                return false
-                                            }
-                                        }
-                                        val eventsOverlay = org.osmdroid.views.overlay.MapEventsOverlay(receiver)
-                                        map.overlays.add(eventsOverlay)
-
-                                        // Eigener Spieler-Marker zur Orientierung
-                                        val playerMarker = org.osmdroid.views.overlay.Marker(map).apply {
-                                            position = spielerPosition
-                                            title = "Deine Position"
-                                            icon = createUserLocationDot(context)
-                                            setAnchor(org.osmdroid.views.overlay.Marker.ANCHOR_CENTER, org.osmdroid.views.overlay.Marker.ANCHOR_CENTER)
-                                        }
-                                        map.overlays.add(playerMarker)
-
-                                        // Die gesetzten Pins zeichnen
-                                        mapSelectedSpots.forEachIndexed { index, spot ->
-                                            val marker = org.osmdroid.views.overlay.Marker(map).apply {
-                                                position = spot.second
-                                                title = spot.first
-                                                subDescription = "Spot ${index + 1}"
-                                                icon = ContextCompat.getDrawable(context, R.drawable.ic_flag_uncaptured)
-                                            }
-                                            map.overlays.add(marker)
-                                        }
-                                        map.invalidate()
                                     }
-                                )
+                                ) {
+                                    // Eigener Spieler-Marker zur Orientierung
+                                    val playerPos = spielerPosition
+                                    if (playerPos != null) {
+                                        Marker(
+                                            state = MarkerState(position = playerPos),
+                                            title = "Deine Position",
+                                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+                                        )
+                                    }
+                                    // Gesetzte Spot-Pins anzeigen
+                                    mapSelectedSpots.forEachIndexed { index, spot ->
+                                        Marker(
+                                            state = MarkerState(position = spot.second),
+                                            title = spot.first,
+                                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE)
+                                        )
+                                    }
+                                }
 
-                                // Karten-Steuerungsknöpfe auf der rechten Seite (Locate, Zoom In, Zoom Out)
+                                // Karten-Steuerungsknöpfe auf der rechten Seite
                                 Column(
                                     modifier = Modifier
                                         .align(Alignment.CenterEnd)
@@ -1235,7 +1145,10 @@ fun DuellErstellenScreen(
                                     // 🎯 Zentrieren
                                     Button(
                                         onClick = {
-                                            mapChooserInstance?.controller?.animateTo(spielerPosition)
+                                            val pos = spielerPosition ?: LatLng(50.9348, 6.9852)
+                                            chooserScope.launch {
+                                                chooserCameraState.animate(CameraUpdateFactory.newLatLngZoom(pos, 17f))
+                                            }
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = DarkBackground.copy(alpha = 0.9f)),
                                         shape = RoundedCornerShape(50.dp),
@@ -1247,7 +1160,11 @@ fun DuellErstellenScreen(
 
                                     // ➕ Zoom In
                                     Button(
-                                        onClick = { mapChooserInstance?.controller?.zoomIn() },
+                                        onClick = {
+                                            chooserScope.launch {
+                                                chooserCameraState.animate(CameraUpdateFactory.zoomIn())
+                                            }
+                                        },
                                         colors = ButtonDefaults.buttonColors(containerColor = DarkBackground.copy(alpha = 0.9f)),
                                         shape = RoundedCornerShape(50.dp),
                                         contentPadding = PaddingValues(0.dp),
@@ -1258,7 +1175,11 @@ fun DuellErstellenScreen(
 
                                     // ➖ Zoom Out
                                     Button(
-                                        onClick = { mapChooserInstance?.controller?.zoomOut() },
+                                        onClick = {
+                                            chooserScope.launch {
+                                                chooserCameraState.animate(CameraUpdateFactory.zoomOut())
+                                            }
+                                        },
                                         colors = ButtonDefaults.buttonColors(containerColor = DarkBackground.copy(alpha = 0.9f)),
                                         shape = RoundedCornerShape(50.dp),
                                         contentPadding = PaddingValues(0.dp),
@@ -1436,7 +1357,7 @@ fun DuellErstellenScreen(
 }
 
 // Nominatim HTTP Suchabfrage
-suspend fun searchPlacesNominatim(query: String): List<Pair<Pair<String, String>, GeoPoint>> = withContext(Dispatchers.IO) {
+suspend fun searchPlacesNominatim(query: String): List<Pair<Pair<String, String>, LatLng>> = withContext(Dispatchers.IO) {
     if (query.length < 3) return@withContext emptyList()
     try {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
@@ -1450,7 +1371,7 @@ suspend fun searchPlacesNominatim(query: String): List<Pair<Pair<String, String>
         if (conn.responseCode == 200) {
             val response = conn.inputStream.bufferedReader().use { it.readText() }
             val jsonArray = JSONArray(response)
-            val results = mutableListOf<Pair<Pair<String, String>, GeoPoint>>()
+            val results = mutableListOf<Pair<Pair<String, String>, LatLng>>()
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
                 val displayName = obj.optString("display_name", "")
@@ -1461,7 +1382,7 @@ suspend fun searchPlacesNominatim(query: String): List<Pair<Pair<String, String>
                 val title = parts.getOrNull(0)?.trim() ?: displayName
                 val subtitle = parts.getOrNull(1)?.trim() ?: ""
                 
-                results.add(Pair(Pair(title, subtitle), GeoPoint(lat, lon)))
+                results.add(Pair(Pair(title, subtitle), LatLng(lat, lon)))
             }
             results
         } else {
@@ -1492,7 +1413,7 @@ fun DuelleTabContent(
                 viewModel.erstelleDuell(name, totalMinutes, spots, gegner)
                 showCreateDuelScreen = false
             },
-            spielerPosition = viewModel.spielerPosition ?: GeoPoint(0.0, 0.0),
+            spielerPosition = viewModel.spielerPosition ?: LatLng(0.0, 0.0),
             currentUserName = viewModel.spielerName,
             searchUsers = { viewModel.sucheBenutzerNamen(it) }
         )
@@ -2061,48 +1982,4 @@ fun KarteTopBar(duellLaeuft: Boolean, viewModel: KarteViewModel = viewModel()) {
             fontSize = 16.sp
         )
     }
-}
-
-fun createUserLocationDot(context: Context): android.graphics.drawable.Drawable {
-    val density = context.resources.displayMetrics.density
-    val size = (24 * density).toInt()
-    val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
-    val canvas = android.graphics.Canvas(bitmap)
-    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-
-    // Outer light blue semi-transparent glow/circle (Google Maps style)
-    paint.color = android.graphics.Color.parseColor("#440088FF")
-    canvas.drawCircle(size / 2f, size / 2f, 11 * density, paint)
-
-    // White outline circle
-    paint.color = android.graphics.Color.WHITE
-    canvas.drawCircle(size / 2f, size / 2f, 7.5f * density, paint)
-
-    // Central solid blue dot
-    paint.color = android.graphics.Color.parseColor("#0088FF")
-    canvas.drawCircle(size / 2f, size / 2f, 5.5f * density, paint)
-
-    return android.graphics.drawable.BitmapDrawable(context.resources, bitmap)
-}
-
-fun createEnemyLocationDot(context: Context): android.graphics.drawable.Drawable {
-    val density = context.resources.displayMetrics.density
-    val size = (24 * density).toInt()
-    val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
-    val canvas = android.graphics.Canvas(bitmap)
-    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-
-    // Outer light red semi-transparent glow/circle (Google Maps style in Red)
-    paint.color = android.graphics.Color.parseColor("#44FF3333")
-    canvas.drawCircle(size / 2f, size / 2f, 11 * density, paint)
-
-    // White outline circle
-    paint.color = android.graphics.Color.WHITE
-    canvas.drawCircle(size / 2f, size / 2f, 7.5f * density, paint)
-
-    // Central solid red dot
-    paint.color = android.graphics.Color.parseColor("#FF3333")
-    canvas.drawCircle(size / 2f, size / 2f, 5.5f * density, paint)
-
-    return android.graphics.drawable.BitmapDrawable(context.resources, bitmap)
 }

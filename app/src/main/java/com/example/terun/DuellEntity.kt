@@ -4,25 +4,40 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 /**
- * DuellEntity — Room-Entity für gespeicherte Duelle.
- * Tabelle: "duelle"
- * Spiegelt das Domain-Objekt Duell 1:1 wider; wird über SpielRepository in Duell konvertiert.
+ * =====================================================================
+ * DuellEntity – Datenbankzeile für ein gespeichertes Lauf-Duell
+ * =====================================================================
+ *
+ * VORLESUNG 34 – Entities (Room):
+ * Jede Instanz dieser Klasse stellt ein Duell dar, das in der lokalen
+ * SQLite-Datenbank gespeichert ist. Room wandelt dieses Kotlin-Objekt
+ * automatisch in eine Datenbankzeile um (Object-Relational-Mapping).
+ *
+ * Aufbau eines Duells:
+ * - Ein Duell hat 1–5 Checkpoints ("Spots"), die der Spieler auf der Karte erreichen muss.
+ * - Jeder Spot wird als Koordinatenpaar (Breitengrad + Längengrad) gespeichert.
+ * - Ein Zeitlimit begrenzt die Spielzeit in Minuten.
+ * - Ein Gegner kann eingeladen werden (kommaseparierte Spielernamen).
  */
-@Entity(tableName = "duelle")
+@Entity(tableName = "duelle") // Name der SQLite-Tabelle in der Datenbank
 data class DuellEntity(
-    @PrimaryKey val id: String,      // UUID des Duells
-    val name: String,                // Bezeichnung
-    val spotsAnzahl: Int,            // Anzahl aktiver Spots (1–5)
-    val zeitLimitMinuten: Int,       // Zeitlimit in Minuten
-    val spot1Lat: Double,            // Spot 1 — Breitengrad
-    val spot1Lng: Double,            // Spot 1 — Längengrad
-    val spot2Lat: Double,            // Spot 2 — Breitengrad
-    val spot2Lng: Double,            // Spot 2 — Längengrad
-    val spot3Lat: Double,            // Spot 3 — Breitengrad
-    val spot3Lng: Double,            // Spot 3 — Längengrad
-    val spot4Lat: Double,            // Spot 4 — Breitengrad
-    val spot4Lng: Double,            // Spot 4 — Längengrad
-    val spot5Lat: Double,            // Spot 5 — Breitengrad
-    val spot5Lng: Double,            // Spot 5 — Längengrad
-    val gegner: String = ""          // Kommaseparierte Anzeigenamen der Gegner (leer = kein Gegner)
+
+    @PrimaryKey
+    val id: String,              // Einmalige UUID des Duells (wird beim Erstellen zufällig generiert)
+
+    val name: String,            // Bezeichnung des Duells (vom Ersteller frei wählbar)
+
+    val spotsAnzahl: Int,        // Anzahl der Checkpoints (erlaubt: 1 bis 5)
+
+    val zeitLimitMinuten: Int,   // Wie viele Minuten hat der Spieler, um alle Spots zu erreichen?
+
+    // Koordinaten der 5 möglichen Checkpoints (Spot 1 bis 5):
+    // lat = Breitengrad (latitude), lng = Längengrad (longitude)
+    val spot1Lat: Double, val spot1Lng: Double, // Spot 1
+    val spot2Lat: Double, val spot2Lng: Double, // Spot 2
+    val spot3Lat: Double, val spot3Lng: Double, // Spot 3
+    val spot4Lat: Double, val spot4Lng: Double, // Spot 4
+    val spot5Lat: Double, val spot5Lng: Double, // Spot 5
+
+    val gegner: String = ""      // Eingeladene Gegner (z.B. "Spieler2,Spieler3"), leer = Solo-Duell
 )

@@ -16,94 +16,165 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.google.android.gms.maps.model.LatLng
 import org.json.JSONObject
-import org.osmdroid.util.GeoPoint
 import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * KarteViewModel — Zentrale Spiellogik der App (MVVM-ViewModel).
- * Hält den gesamten Spielzustand und kommuniziert zwischen UI (KarteScreen)
- * und Datenschicht (SpielRepository, LocationHelper, NotificationHelper).
+ * =====================================================================
+ * KarteViewModel – Zentrale Spiellogik der App (MVVM-ViewModel)
+ * =====================================================================
+ *
+ * VORLESUNG 18 – MVVM (Model-View-ViewModel):
+ * Das ViewModel ist die mittlere Schicht zwischen UI und Daten.
+ * Es hält den gesamten UI-Zustand und enthält die Spiellogik.
+ *
+ * Aufgaben des ViewModels:
+ * - Stellt Daten für die UI bereit (Spielerstatus, GPS-Position, Duell-State)
+ * - Reagiert auf Benutzeraktionen (Duell starten, Freund hinzufügen, ...)
+ * - Weiß NICHTS über konkrete UI-Komponenten (kein Verweis auf Composables)
+ * - Überlebt Konfigurationsänderungen wie Bildschirmdrehung
+ *
+ * AndroidViewModel vs. ViewModel:
+ * AndroidViewModel bekommt zusätzlich den Application-Kontext,
+ * der benötigt wird um Services zu starten/stoppen (z.B. TeRunLocationService).
+ *
+ * VORLESUNG 28–30 – Coroutines:
+ * Alle Datenbankzugriffe und Netzwerkanfragen laufen in Coroutinen:
+ * - viewModelScope.launch { } → startet eine Coroutine im ViewModel-Scope
+ * - withContext(Dispatchers.IO) → führt Datenbankoperationen auf IO-Thread aus
+ * - Wenn das ViewModel gelöscht wird, werden alle Coroutinen automatisch abgebrochen
  */
 class KarteViewModel(application: Application) : AndroidViewModel(application) {
 
-    // --- Abhängigkeiten ---
-    private val repository = SpielRepository(application)         // Datenzugriff (Room + SharedPreferences)
-    private val locationHelper = LocationHelper(application)      // GPS-Ortung
-    private val notificationHelper = NotificationHelper(application) // Push-Benachrichtigungen
+    // --- Abhängigkeiten (MVVM: ViewModel kennt das Repository, aber keine UI) ---
+    // Repository = Datenschicht (Room-Datenbank + Firebase Firestore + SharedPreferences)
+    private val repository = SpielRepository(application)
+    // LocationHelper = GPS-Ortung über den Android LocationManager (VL 43)
+    private val locationHelper = LocationHelper(application)
+    // NotificationHelper = Push-Benachrichtigungen (VL 41)
+    private val notificationHelper = NotificationHelper(application)
 
-    // --- Profil ---
-    // Interner State für den Spielernamen — Änderungen werden automatisch in SharedPreferences gespeichert
+    // ==============================
+    // Profil-Daten
+    // ==============================
+
+    // Spielername: interner State, Änderungen werden sofort in SharedPreferences gespeichert
+    // mutableStateOf → Compose rendert automatisch neu wenn sich der Wert ändert (VL 14)
     private var _spielerName = mutableStateOf("")
     var spielerName: String
         get() = _spielerName.value
         set(value) {
             _spielerName.value = value
-            repository.speichereSpielerName(value) // Gleichzeitig in DB und Prefs persistieren
+            repository.speichereSpielerName(value) // Gleichzeitig lokal (Prefs) + Firestore speichern
         }
 
-    var spielerGesamtDistanz by mutableStateOf(0.0)  // Gelaufene Gesamtdistanz in Kilometern
-    var absolvierteDuelleCount by mutableIntStateOf(0) // Anzahl abgeschlossener Duelle
+    var spielerGesamtDistanz by mutableStateOf(0.0)  // Gesamt gelaufene Kilometer (aus SharedPreferences geladen)
+    var absolvierteDuelleCount by mutableIntStateOf(0) // Anzahl abgeschlossener Duelle (Profil-Statistik)
 
-    // --- GPS / Position ---
-    var spielerPosition by mutableStateOf<GeoPoint?>(null)  // Aktuelle GPS-Koordinate des Spielers (null = noch kein Fix)
-    var startPositionGeo by mutableStateOf<GeoPoint?>(null) // Startposition bei Duellbeginn (= Zielpunkt nach allen Spots)
+    // ==============================
+    // GPS-Position (VL 43 – Location-based Services)
+    // ==============================
 
-    // --- Spot-Status ---
-    // Jeder Spot hat einen eigenen Boolean-State; true = bereits vom Spieler erreicht
+    // Aktuelle GPS-Koordinate des Spielers (null = noch kein GPS-Fix erhalten)
+    var spielerPosition by mutableStateOf<LatLng?>(null)
+    // Startposition beim Duellbeginn (wird nach allen Spots zum Zielpunkt)
+    var startPositionGeo by mutableStateOf<LatLng?>(null)
+
+    // ==============================
+    // Checkpoint-Status (Spots)
+    // ==============================
+
+    // Für jeden der 5 möglichen Checkpoints: true = Spieler hat ihn bereits erreicht
+    // mutableStateOf → UI (Karte) wird automatisch aktualisiert wenn sich der Wert ändert
     var spot1Captured by mutableStateOf(false)
     var spot2Captured by mutableStateOf(false)
     var spot3Captured by mutableStateOf(false)
     var spot4Captured by mutableStateOf(false)
     var spot5Captured by mutableStateOf(false)
 
-    // --- Daten-Listen ---
-    val duelle = mutableStateListOf<Duell>()   // Alle gespeicherten Duelle (aus Room geladen)
-    val freunde = mutableStateListOf<String>() // Anzeigenamen der Freunde des eingeloggten Spielers
+    // ==============================
+    // Daten-Listen (aus Room-Datenbank geladen)
+    // ==============================
 
-    // --- Neue Multiplayer- & Live-States ---
-    val ausstehendeFreundesanfragen = mutableStateListOf<String>() // Eingehende Freundesanfragen
-    val ausstehendeDuellEinladungen = mutableStateListOf<Duell>() // Eingehende Duell-Einladungen
-    val gegnerStati = mutableStateMapOf<String, Pair<GeoPoint, Int>>() // GegnerName -> (Position, eroberte Spots)
-    val activeDuelInvitations = mutableStateMapOf<String, String>() // GegnerName -> Status (PENDING, ACCEPTED, DECLINED)
-    var toastMessage by mutableStateOf<String?>(null) // Einfacher Toast-Notifier für Composable-UI
+    // mutableStateListOf → Compose erkennt Änderungen an der Liste und rendert neu
+    val duelle = mutableStateListOf<Duell>()   // Alle gespeicherten Duelle (aus Room-DB)
+    val freunde = mutableStateListOf<String>() // Anzeigenamen der bestätigten Freunde
 
+    // ==============================
+    // Multiplayer & Echtzeit-Zustände (Firebase Firestore – VL 46)
+    // ==============================
+
+    val ausstehendeFreundesanfragen = mutableStateListOf<String>()       // Eingehende Freundschaftsanfragen (noch nicht beantwortet)
+    val ausstehendeDuellEinladungen = mutableStateListOf<Duell>()        // Eingehende Duell-Einladungen (noch nicht beantwortet)
+    val gegnerStati = mutableStateMapOf<String, Pair<LatLng, Int>>()    // Live-Daten der Gegner: Name → (GPS-Position, Anzahl Spots)
+    val activeDuelInvitations = mutableStateMapOf<String, String>()     // Einladungs-Status pro Gegner: PENDING / ACCEPTED / DECLINED
+    var toastMessage by mutableStateOf<String?>(null)                   // Kurze Statusmeldung für die UI (z.B. "Spieler X hat Spot erobert!")
+
+    // Firestore Echtzeit-Listener: werden beim Start eines Duells aktiviert,
+    // beim Beenden sauber abgemeldet (wichtig für Ressourcen-Management)
     private var duelInvitationsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var liveSessionListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var acceptedRequestsListener: com.google.firebase.firestore.ListenerRegistration? = null
 
-    // --- Routing (Deaktiviert für Meilenstein 5) ---
+    // ==============================
+    // Spielzustand
+    // ==============================
 
-    // --- Spielzustand ---
-    var aktivesDuell by mutableStateOf<Duell?>(null) // Das gerade laufende Duell (null = kein Duell aktiv)
-        private set
-    var status by mutableStateOf(SpielStatus.IDLE)   // Aktueller Spielstatus: IDLE, LAEUFT oder BEENDET
-        private set
-    var verbleibendeZeit by mutableIntStateOf(0)     // Verbleibende Zeit in Sekunden
-        private set
-    var ergebnisse by mutableStateOf<List<Ergebnis>>(emptyList()) // Ergebnisliste nach Duellende
+    // Das aktuelle laufende Duell (null = kein Duell aktiv)
+    // private set → nur intern veränderbar, von außen nur lesbar
+    var aktivesDuell by mutableStateOf<Duell?>(null)
         private set
 
-    private var timerJob: Job? = null // Coroutine-Job für den Countdown-Timer
+    // Aktueller Spielstatus (IDLE = wartend, LAEUFT = Spiel läuft, BEENDET = Spiel vorbei)
+    var status by mutableStateOf(SpielStatus.IDLE)
+        private set
 
-    // --- Initialisierung ---
-    // Wird einmalig beim Erstellen des ViewModels ausgeführt — lädt alle persistierten Daten
+    // Verbleibende Spielzeit in Sekunden (wird jede Sekunde durch den Timer verringert)
+    var verbleibendeZeit by mutableIntStateOf(0)
+        private set
+
+    // Ergebnisliste aller Teilnehmer nach Duellende (nach Punkten sortiert)
+    var ergebnisse by mutableStateOf<List<Ergebnis>>(emptyList())
+        private set
+
+    // Coroutine-Job für den Countdown-Timer (kann abgebrochen werden)
+    // VORLESUNG 29 – Jobs: Ein Job repräsentiert eine laufende Coroutine
+    private var timerJob: Job? = null
+
+    // ==============================
+    // Initialisierung
+    // ==============================
+
+    /**
+     * init-Block: wird einmalig beim Erstellen des ViewModels ausgeführt.
+     * Lädt alle gespeicherten Daten aus SharedPreferences und Room-Datenbank.
+     *
+     * VORLESUNG 28 – Coroutines:
+     * viewModelScope.launch { } startet eine Coroutine im ViewModel-Scope.
+     * Wenn das ViewModel gelöscht wird, werden alle Coroutinen automatisch beendet.
+     */
     init {
-        _spielerName.value = repository.ladeSpielerName()           // Name aus SharedPreferences laden
-        spielerGesamtDistanz = repository.ladeGesamtDistanz()       // Gesamtdistanz laden
-        absolvierteDuelleCount = repository.ladeAbsolvierteDuelleCount() // Duellanzahl laden
-        viewModelScope.launch { duelle.addAll(repository.holeDuelle()) }      // Duelle asynchron aus Room laden
-        viewModelScope.launch { 
-            freunde.addAll(repository.holeFreunde(repository.getAccountKey())) // Freunde laden
-            ladeAusstehendeFreundesanfragen()
-            ladeDuellEinladungen()
-            starteBeobachtungAngenommeneAnfragen()
+        // Profil-Daten aus SharedPreferences laden (schnell, kein Hintergrundthread nötig)
+        _spielerName.value = repository.ladeSpielerName()
+        spielerGesamtDistanz = repository.ladeGesamtDistanz()
+        absolvierteDuelleCount = repository.ladeAbsolvierteDuelleCount()
+
+        // Duelle aus Room-Datenbank asynchron laden (IO-Thread, Dispatchers.IO im Repository)
+        viewModelScope.launch { duelle.addAll(repository.holeDuelle()) }
+
+        // Freunde, Anfragen und Einladungen von Firestore laden
+        viewModelScope.launch {
+            freunde.addAll(repository.holeFreunde(repository.getAccountKey()))
+            ladeAusstehendeFreundesanfragen()       // Offene Freundschaftsanfragen laden
+            ladeDuellEinladungen()                  // Offene Duell-Einladungen laden
+            starteBeobachtungAngenommeneAnfragen()  // Echtzeit-Listener starten
         }
     }
 
     // ==========================================================================
-    // Freunde
+    // Freundes-Verwaltung (Firestore + Room)
     // ==========================================================================
 
     // Freundesliste neu aus der Datenbank laden und den State aktualisieren
@@ -235,11 +306,11 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ==========================================================================
-    // Duell-Verwaltung
+    // Duell-Verwaltung (Room-Datenbank + Firestore)
     // ==========================================================================
 
     // Neues Duell erstellen und sowohl im UI-State als auch in der Room-DB speichern
-    fun erstelleDuell(name: String, zeitLimitMinuten: Int, spotsList: List<GeoPoint>, gegner: String) {
+    fun erstelleDuell(name: String, zeitLimitMinuten: Int, spotsList: List<LatLng>, gegner: String) {
         // Hilfsfunktionen zum sicheren Zugriff auf Spot-Koordinaten (0.0 wenn kein Spot an dieser Stelle)
         fun lat(i: Int) = spotsList.getOrNull(i)?.latitude ?: 0.0
         fun lng(i: Int) = spotsList.getOrNull(i)?.longitude ?: 0.0
@@ -266,7 +337,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ==========================================================================
-    // Profil
+    // Profil-Verwaltung (SharedPreferences + Room)
     // ==========================================================================
 
     // Eigenes Konto vollständig löschen: DB-Einträge, SharedPreferences und UI-State zurücksetzen
@@ -285,7 +356,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ==========================================================================
-    // Standort & Spielstart
+    // GPS-Standort & Spielstart (VL 43 – Location-based Services)
     // ==========================================================================
 
     // GPS-Updates starten; bei jeder neuen Position: Distanz berechnen, Spots prüfen, Route aktualisieren
@@ -305,7 +376,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun onLocationUpdated(location: android.location.Location) {
         val prevPos = spielerPosition
-        val currentGeo = GeoPoint(location.latitude, location.longitude)
+        val currentGeo = LatLng(location.latitude, location.longitude)
         spielerPosition = currentGeo
 
         // Distanz nur während laufendem Duell und wenn eine Vorposition bekannt ist
@@ -476,7 +547,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
                         if (alterState != null && spots > alterState.second) {
                             toastMessage = "Spieler $name hat einen Spot erobert!"
                         }
-                        gegnerStati[name] = GeoPoint(lat, lng) to spots
+                        gegnerStati[name] = LatLng(lat, lng) to spots
                     }
                 }
             }
@@ -489,7 +560,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ==========================================================================
-    // Spot-Hilfsfunktionen (privat)
+    // Checkpoint-Hilfsfunktionen (intern, werden vom GPS-Callback aufgerufen)
     // ==========================================================================
 
     // Gibt zurück, ob ein Spot mit dem Index 1–5 bereits erreicht wurde
@@ -570,10 +641,20 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         repository.sucheBenutzerNamen(query)
 
     // ==========================================================================
-    // Haversine-Distanzberechnung
+    // Distanzberechnung (Haversine-Formel)
     // ==========================================================================
 
-    // Berechnet die Luftliniendistanz zwischen zwei GPS-Koordinaten in Metern (Haversine-Formel)
+    /**
+     * Berechnet die Luftliniendistanz zwischen zwei GPS-Koordinaten in Metern.
+     * Verwendet die Haversine-Formel, die die Kugelform der Erde berücksichtigt.
+     *
+     * Wird verwendet um zu prüfen ob der Spieler nah genug an einem Checkpoint ist
+     * (Radius: 20 Meter) oder ob er am Startpunkt angekommen ist (Siegbedingung).
+     *
+     * @param lat1, lon1 – Koordinaten des ersten Punktes (z.B. Spieler)
+     * @param lat2, lon2 – Koordinaten des zweiten Punktes (z.B. Checkpoint)
+     * @return Distanz in Metern
+     */
     private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
         val r = 6371000.0 // Erdradius in Metern
         val dLat = Math.toRadians(lat2 - lat1)
@@ -585,18 +666,28 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ==========================================================================
-    // Lifecycle
+    // Lifecycle – Aufräumen wenn ViewModel beendet wird (VL 9 – Lifecycle)
     // ==========================================================================
 
-    // Wird aufgerufen wenn das ViewModel zerstört wird (z.B. App geschlossen)
+    /**
+     * onCleared() wird aufgerufen wenn das ViewModel nicht mehr benötigt wird
+     * (z.B. wenn der Benutzer die App schließt oder sich ausloggt).
+     * Hier werden alle laufenden Prozesse sauber beendet:
+     * - Coroutine-Timer stoppen
+     * - Firestore Listener abmelden (sonst: Speicherleck!)
+     * - Foreground Service stoppen
+     * - GPS-Updates abmelden (sonst: Akkuverbrauch!)
+     */
     override fun onCleared() {
         super.onCleared()
-        timerJob?.cancel()                  // Timer stoppen
-        stoppeDuellEinladungenBeobachtung()
-        stoppeLiveSessionBeobachtung()
-        acceptedRequestsListener?.remove()
+
+        timerJob?.cancel()                      // Countdown-Timer-Coroutine stoppen
+        stoppeDuellEinladungenBeobachtung()     // Firestore-Listener für Einladungen abmelden
+        stoppeLiveSessionBeobachtung()          // Firestore-Listener für Multiplayer abmelden
+        acceptedRequestsListener?.remove()      // Firestore-Listener für Freundschaftsanfragen
         acceptedRequestsListener = null
-        
+
+        // Foreground Location Service stoppen (VL 25 – Services)
         val context = getApplication<Application>().applicationContext
         val serviceIntent = Intent(context, TeRunLocationService::class.java)
         try {
@@ -605,7 +696,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
             e.printStackTrace()
         }
 
-        locationHelper.stopLocationUpdates() // GPS-Updates abmelden
-        TeRunLocationService.onLocationReceived = null
+        locationHelper.stopLocationUpdates()        // GPS-Updates beim LocationManager abmelden
+        TeRunLocationService.onLocationReceived = null // Callback auf null setzen
     }
 }
