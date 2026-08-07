@@ -852,6 +852,110 @@ class SpielRepository(private val context: Context) {
         }
     }
 
+    // Holt ausstehende GESENDETE Freundschaftsanfragen für den angemeldeten Benutzer
+    suspend fun holeGesendeteFreundesanfragen(ownerEmail: String): List<String> = withContext(Dispatchers.IO) {
+        val cleanOwnerEmail = ownerEmail.trim().lowercase()
+        val myName = ladeSpielerName()
+
+        if (!networkMonitor.isOnline.value) return@withContext emptyList()
+        try {
+            suspendCancellableCoroutine<List<String>> { continuation ->
+                firestore.collection("friend_requests")
+                    .whereEqualTo("status", "PENDING")
+                    .get()
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            val list = task.result.mapNotNull { doc ->
+                                val sEmail = (doc.getString("senderEmail") ?: "").lowercase()
+                                val sName = doc.getString("senderName") ?: ""
+                                val rName = doc.getString("receiverName") ?: ""
+
+                                val isFromMe = (sEmail == cleanOwnerEmail || sName.equals(myName, ignoreCase = true))
+                                if (isFromMe && rName.isNotBlank()) rName else null
+                            }
+                            continuation.resume(list.distinct())
+                        } else {
+                            continuation.resume(emptyList())
+                        }
+                    }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
+        }
+    }
+
+    // Gesendete Freundschaftsanfrage zurückziehen / stornieren
+    suspend fun zieheFreundesanfrageZurueck(ownerEmail: String, targetName: String) = withContext(Dispatchers.IO) {
+        val cleanOwnerEmail = ownerEmail.trim().lowercase()
+        var targetUser = dao.getBenutzerByName(targetName)
+        var targetEmail = targetUser?.email?.trim()?.lowercase() ?: ""
+
+        if (targetEmail.isBlank() && networkMonitor.isOnline.value) {
+            try {
+                val foundEmail = suspendCancellableCoroutine<String?> { continuation ->
+                    firestore.collection("users")
+                        .whereEqualTo("name_lowercase", targetName.trim().lowercase())
+                        .limit(1)
+                        .get()
+                        .addOnSuccessListener { r ->
+                            if (!r.isEmpty) continuation.resume(r.documents[0].getString("email"))
+                            else continuation.resume(null)
+                        }
+                        .addOnFailureListener { continuation.resume(null) }
+                }
+                if (foundEmail != null) targetEmail = foundEmail.trim().lowercase()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        if (targetEmail.isNotBlank()) {
+            val docId = if (cleanOwnerEmail < targetEmail) "${cleanOwnerEmail}_${targetEmail}" else "${targetEmail}_${cleanOwnerEmail}"
+            dao.deleteFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = targetEmail, status = "SENT_PENDING"))
+
+            if (networkMonitor.isOnline.value) {
+                try {
+                    firestore.collection("friend_requests").document(docId).delete()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
+    // Setzt alle hängengebliebenen ausstehenden Freundschaftsanfragen in Firestore und DB zurück
+    suspend fun resetAlleFreundschaftsanfragen(ownerEmail: String) = withContext(Dispatchers.IO) {
+        val cleanOwnerEmail = ownerEmail.trim().lowercase()
+        val myName = ladeSpielerName()
+
+        dao.deletePendingFreundeByOwner(cleanOwnerEmail)
+
+        if (networkMonitor.isOnline.value) {
+            try {
+                firestore.collection("friend_requests").get()
+                    .addOnSuccessListener { snapshot ->
+                        for (doc in snapshot.documents) {
+                            val status = doc.getString("status") ?: ""
+                            if (status == "PENDING") {
+                                val sEmail = (doc.getString("senderEmail") ?: "").lowercase()
+                                val sName = doc.getString("senderName") ?: ""
+                                val rEmail = (doc.getString("receiverEmail") ?: "").lowercase()
+                                val rName = doc.getString("receiverName") ?: ""
+
+                                if (sEmail == cleanOwnerEmail || rEmail == cleanOwnerEmail ||
+                                    sName.equals(myName, ignoreCase = true) || rName.equals(myName, ignoreCase = true)) {
+                                    doc.reference.delete()
+                                }
+                            }
+                        }
+                    }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     // Antwortet auf eine Freundschaftsanfrage
     suspend fun antworteAufFreundesanfrage(ownerEmail: String, senderName: String, akzeptiert: Boolean) = withContext(Dispatchers.IO) {
         val cleanOwnerEmail = ownerEmail.trim().lowercase()

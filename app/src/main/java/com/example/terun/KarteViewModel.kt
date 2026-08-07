@@ -107,6 +107,33 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     // ==============================
 
     val ausstehendeFreundesanfragen = mutableStateListOf<String>()       // Eingehende Freundschaftsanfragen (noch nicht beantwortet)
+    val gesendeteFreundesanfragen = mutableStateListOf<String>()         // Ausstehende selbst gesendete Freundschaftsanfragen
+
+    // Holt ausstehende GESENDETE Freundschaftsanfragen
+    fun ladeGesendeteFreundesanfragen() {
+        viewModelScope.launch {
+            gesendeteFreundesanfragen.clear()
+            gesendeteFreundesanfragen.addAll(repository.holeGesendeteFreundesanfragen(repository.getAccountKey()))
+        }
+    }
+
+    // Gesendete Freundschaftsanfrage zurückziehen
+    fun zieheFreundesanfrageZurueck(name: String) {
+        viewModelScope.launch {
+            repository.zieheFreundesanfrageZurueck(repository.getAccountKey(), name)
+            ladeGesendeteFreundesanfragen()
+            ladeAusstehendeFreundesanfragen()
+        }
+    }
+
+    // Setzt alle hängengebliebenen Anfragen in DB & Firestore mit 1 Klick zurück
+    fun resetAlleFreundschaftsanfragen() {
+        viewModelScope.launch {
+            repository.resetAlleFreundschaftsanfragen(repository.getAccountKey())
+            ladeAusstehendeFreundesanfragen()
+            ladeGesendeteFreundesanfragen()
+        }
+    }
     val ausstehendeDuellEinladungen = mutableStateListOf<Duell>()        // Eingehende Duell-Einladungen (noch nicht beantwortet)
     val gegnerStati = mutableStateMapOf<String, Pair<LatLng, Int>>()    // Live-Daten der Gegner: Name → (GPS-Position, Anzahl Spots)
     val activeDuelInvitations = mutableStateMapOf<String, String>()     // Einladungs-Status pro Gegner: PENDING / ACCEPTED / DECLINED
@@ -175,6 +202,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
             repository.bereinigeAusstehendeAnfragen(repository.getAccountKey())
             freunde.addAll(repository.holeFreunde(repository.getAccountKey()))
             ladeAusstehendeFreundesanfragen()       // Offene Freundschaftsanfragen laden
+            ladeGesendeteFreundesanfragen()         // Selbst gesendete Anfragen laden
             ladeDuellEinladungen()                  // Offene Duell-Einladungen laden
             starteBeobachtungAngenommeneAnfragen()  // Echtzeit-Listener starten
             starteBeobachtungEingehendeAnfragen()   // Live-Empfang von Anfragen
@@ -214,6 +242,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.antworteAufFreundesanfrage(repository.getAccountKey(), senderName, akzeptiert)
             ladeAusstehendeFreundesanfragen()
+            ladeGesendeteFreundesanfragen()
             ladeFreunde()
         }
     }
@@ -222,7 +251,8 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     fun fuegeFreundHinzu(name: String, onResult: (String) -> Unit) {
         viewModelScope.launch {
             val result = repository.fuegeFreundHinzu(repository.getAccountKey(), name)
-            if (result == "SUCCESS") ladeAusstehendeFreundesanfragen() // Anfrage wird gesendet
+            ladeAusstehendeFreundesanfragen()
+            ladeGesendeteFreundesanfragen()
             onResult(result)
         }
     }
