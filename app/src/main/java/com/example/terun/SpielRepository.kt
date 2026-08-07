@@ -383,9 +383,14 @@ class SpielRepository(private val context: Context) {
                             val myEmail = getAccountKey()
                             val myName = ladeSpielerName()
                             for (doc in task.result) {
+                                val creator = doc.getString("creator") ?: ""
                                 val gegnerStr = doc.getString("gegner") ?: ""
-                                val gegnerList = gegnerStr.split(",").map { it.trim() }
-                                if (gegnerList.contains(myName) || gegnerList.contains(myEmail) || doc.getString("creator") == myEmail) {
+                                val invitations = doc.get("invitations") as? Map<String, String> ?: emptyMap()
+                                val myInvitationStatus = invitations[myName] ?: invitations[myEmail]
+
+                                // Ein Duell gehört nur unter "Verfügbare Duelle", wenn ich der Ersteller bin
+                                // ODER wenn ich eingeladen wurde UND die Einladung ACCEPTED habe.
+                                if (creator == myEmail || myInvitationStatus == "ACCEPTED") {
                                     list.add(
                                         Duell(
                                             id = doc.id,
@@ -438,7 +443,15 @@ class SpielRepository(private val context: Context) {
                 )
             )
         }
-        dao.getAlleDuelle().map { it.toDuell() } // Entity → Domain-Objekt
+        if (networkMonitor.isOnline.value) {
+            serverDuelle
+        } else {
+            val myName = ladeSpielerName()
+            val myEmail = getAccountKey()
+            dao.getAlleDuelle().map { it.toDuell() }.filter { duell ->
+                duell.gegner.isEmpty() || duell.gegner.contains(myName) || duell.gegner.contains(myEmail)
+            }
+        }
     }
 
     // Duell als neue Zeile in die Room-DB und Firestore schreiben
@@ -645,12 +658,6 @@ class SpielRepository(private val context: Context) {
                 }
             }
 
-<<<<<<< HEAD
-            // Smart-Cast-sicheren Zugriff auf friendUser erzwingen
-            val resolvedFriend = friendUser ?: return@withContext false
-            val friendEmail = resolvedFriend.email
-            if (ownerEmail == friendEmail) return@withContext false
-=======
             if (friendUser == null) return@withContext "USER_NOT_FOUND"
             val friendEmail = friendUser.email
             if (ownerEmail == friendEmail) return@withContext "SELF_REQUEST"
@@ -700,7 +707,6 @@ class SpielRepository(private val context: Context) {
                     e.printStackTrace()
                 }
             }
->>>>>>> fa46e4070c4f87a2a24c034715166cfa82994dac
 
             // Lokalen Eintrag als PENDING speichern
             dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
@@ -826,6 +832,7 @@ class SpielRepository(private val context: Context) {
     suspend fun antworteAufDuellEinladung(duelId: String, akzeptiert: Boolean) = withContext(Dispatchers.IO) {
         if (!networkMonitor.isOnline.value) return@withContext
         val myName = ladeSpielerName()
+        val myEmail = getAccountKey()
         val statusValue = if (akzeptiert) "ACCEPTED" else "DECLINED"
         try {
             val docRef = firestore.collection("duels").document(duelId)
@@ -833,9 +840,13 @@ class SpielRepository(private val context: Context) {
                 val snapshot = transaction.get(docRef)
                 val invitations = snapshot.get("invitations") as? Map<String, String> ?: emptyMap()
                 val updatedInvitations = invitations.toMutableMap()
-                if (updatedInvitations.containsKey(myName)) {
-                    updatedInvitations[myName] = statusValue
+                // Sowohl Name als auch E-Mail als Schlüssel berücksichtigen
+                for (key in invitations.keys) {
+                    if (key.equals(myName, ignoreCase = true) || key.equals(myEmail, ignoreCase = true)) {
+                        updatedInvitations[key] = statusValue
+                    }
                 }
+                updatedInvitations[myName] = statusValue
                 transaction.update(docRef, "invitations", updatedInvitations)
             }.addOnFailureListener { it.printStackTrace() }
         } catch (e: Exception) {
@@ -843,13 +854,45 @@ class SpielRepository(private val context: Context) {
         }
     }
 
-    // Schreibt Live-Koordinaten und Score in die Multiplayer-Session
-    fun updateLiveSession(duelId: String, playerEmail: String, lat: Double, lng: Double, spotsCaptured: Int) {
+    // Setzt das Signal in Firestore, dass das Duell gestartet wurde
+    fun starteSpielInFirestore(duelId: String) {
+        if (!networkMonitor.isOnline.value) return
+        try {
+            firestore.collection("duels").document(duelId)
+                .update("started", true)
+                .addOnFailureListener { it.printStackTrace() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // Beobachtet in Echtzeit, ob der Ersteller das Duell gestartet hat
+    fun beobachteSpielstart(duelId: String, onStart: () -> Unit): com.google.firebase.firestore.ListenerRegistration? {
+        if (!networkMonitor.isOnline.value) return null
+        return try {
+            firestore.collection("duels").document(duelId)
+                .addSnapshotListener { snapshot, error ->
+                    if (snapshot != null && snapshot.exists()) {
+                        val isStarted = snapshot.getBoolean("started") ?: false
+                        if (isStarted) {
+                            onStart()
+                        }
+                    }
+                }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    // Schreibt Live-Koordinaten, Score und Aufgabe-Status in die Multiplayer-Session
+    fun updateLiveSession(duelId: String, playerEmail: String, lat: Double, lng: Double, spotsCaptured: Int, giveUp: Boolean = false) {
         if (!networkMonitor.isOnline.value) return
         val playerSession = mapOf(
             "lat" to lat,
             "lng" to lng,
             "spotsCaptured" to spotsCaptured,
+            "giveUp" to giveUp,
             "timestamp" to System.currentTimeMillis()
         )
         try {
@@ -960,6 +1003,28 @@ class SpielRepository(private val context: Context) {
                                 }
                             }
                         }
+                    }
+                }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    // Beobachtet in Echtzeit, ob dieser Nutzer neue Freundschaftsanfragen erhält
+    fun starteBeobachtungEingehendeAnfragen(ownerEmail: String, onRequestReceived: () -> Unit): com.google.firebase.firestore.ListenerRegistration? {
+        if (!networkMonitor.isOnline.value) return null
+        return try {
+            firestore.collection("friend_requests")
+                .whereEqualTo("receiverEmail", ownerEmail)
+                .whereEqualTo("status", "PENDING")
+                .addSnapshotListener { snapshots, error ->
+                    if (error != null) {
+                        error.printStackTrace()
+                        return@addSnapshotListener
+                    }
+                    if (snapshots != null && !snapshots.isEmpty) {
+                        onRequestReceived()
                     }
                 }
         } catch (e: Exception) {

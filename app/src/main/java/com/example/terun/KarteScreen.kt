@@ -198,13 +198,12 @@ fun KarteScreen(
                                     myLocationButtonEnabled = false
                                 )
                             ) {
-                                // 1. Eigener Spieler-Marker
+                                // 1. Eigener Spieler-Marker (Blau, nur Name)
                                 val playerPos = viewModel.spielerPosition
                                 if (playerPos != null) {
                                     Marker(
                                         state = MarkerState(position = playerPos),
                                         title = viewModel.spielerName,
-                                        snippet = "Deine Position",
                                         icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
                                     )
                                 }
@@ -221,17 +220,25 @@ fun KarteScreen(
                                         )
                                     }
 
-                                    // 2.5 Gegner-Marker (rot)
+                                    // 2.5 Gegner-Marker (Individuelle Farben pro Spieler, NUR Name am Marker)
+                                    val opponentHuePalette = listOf(
+                                        BitmapDescriptorFactory.HUE_MAGENTA,
+                                        BitmapDescriptorFactory.HUE_VIOLET,
+                                        BitmapDescriptorFactory.HUE_CYAN,
+                                        BitmapDescriptorFactory.HUE_YELLOW,
+                                        BitmapDescriptorFactory.HUE_ROSE
+                                    )
                                     for ((gegnerName, statePair) in viewModel.gegnerStati) {
+                                        val colorIndex = (gegnerName.hashCode() and 0x7FFFFFFF) % opponentHuePalette.size
                                         Marker(
                                             state = MarkerState(position = statePair.first),
-                                            title = "$gegnerName (${statePair.second} Spots)",
-                                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
+                                            title = gegnerName, // Nur Name, KEIN Punktestand am Marker!
+                                            icon = BitmapDescriptorFactory.defaultMarker(opponentHuePalette[colorIndex])
                                         )
                                     }
 
                                     val count = active.spotsAnzahl
-                                    // 3. Spot-Marker mit Farbe je nach Status
+                                    // 3. Spot-Marker mit Farbe je nach Status (orange)
                                     val spotCoords = listOf(
                                         LatLng(active.spot1Lat, active.spot1Lng),
                                         LatLng(active.spot2Lat, active.spot2Lng),
@@ -259,9 +266,39 @@ fun KarteScreen(
                                 }
                             }
 
-                            // Live Multiplayer-Scoreboard (Meilenstein 5)
+                            // Banner für Eingeladene: Wartend auf Spielstart durch den Ersteller
+                            if (viewModel.waitingForStart) {
+                                GlassmorphicCard(
+                                    modifier = Modifier
+                                        .align(Alignment.TopCenter)
+                                        .padding(top = 80.dp, start = 16.dp, end = 16.dp)
+                                        .fillMaxWidth(0.9f)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(14.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = "⏳ Duell akzeptiert!",
+                                            color = SpotOrange,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Warte auf Ersteller... Spiel startet automatisch sobald der Ersteller 'Starten' drückt.",
+                                            color = Color.White.copy(alpha = 0.85f),
+                                            fontSize = 13.sp,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Live Multiplayer-Scoreboard Overlay (wird per 📊 Button geöffnet)
+                            var showScoreOverlay by remember { mutableStateOf(false) }
                             val active = viewModel.aktivesDuell
-                            if (duellLaeuft && active != null) {
+                            if (duellLaeuft && active != null && showScoreOverlay) {
                                 val myScore = listOf(
                                     viewModel.spot1Captured,
                                     viewModel.spot2Captured,
@@ -272,22 +309,34 @@ fun KarteScreen(
 
                                 GlassmorphicCard(
                                     modifier = Modifier
-                                        .align(Alignment.TopStart)
-                                        .padding(top = 80.dp, start = 14.dp) // Unter der Top-Bar platzieren
-                                        .width(200.dp)
+                                        .align(Alignment.BottomEnd)
+                                        .padding(bottom = 80.dp, end = 14.dp)
+                                        .width(220.dp)
                                 ) {
-                                    Column(modifier = Modifier.padding(10.dp)) {
-                                        Text("Punkte-Stand", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text("Du: $myScore / ${active.spotsAnzahl} Spots", color = TeRunBlue, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("📊 Punkte-Stand", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                            IconButton(
+                                                onClick = { showScoreOverlay = false },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(Icons.Default.Close, contentDescription = "Schließen", tint = Color.White.copy(alpha = 0.7f))
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text("Du (${viewModel.spielerName}): $myScore / ${active.spotsAnzahl} Spots", color = TeRunBlue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                         viewModel.gegnerStati.forEach { (name, statePair) ->
-                                            Text("$name: ${statePair.second} / ${active.spotsAnzahl} Spots", color = Color.Red, fontSize = 12.sp)
+                                            Text("$name: ${statePair.second} / ${active.spotsAnzahl} Spots", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
                                         }
                                     }
                                 }
                             }
 
-                            // Karten-Steuerungsknöpfe auf der rechten Seite (Locate, Zoom In, Zoom Out)
+                            // Karten-Steuerungsknöpfe auf der rechten Seite (Zentrieren, Zoom In, Zoom Out, Scoreboard)
                             val coroutineScope = rememberCoroutineScope()
                             Column(
                                 modifier = Modifier
@@ -340,6 +389,56 @@ fun KarteScreen(
                                 ) {
                                     Text("➖", fontSize = 18.sp)
                                 }
+
+                                // 📊 Punktestand-Button (unterhalb der Zoom-Buttons)
+                                if (duellLaeuft) {
+                                    Button(
+                                        onClick = { showScoreOverlay = !showScoreOverlay },
+                                        colors = ButtonDefaults.buttonColors(containerColor = DarkBackground.copy(alpha = 0.9f)),
+                                        shape = RoundedCornerShape(50.dp),
+                                        contentPadding = PaddingValues(0.dp),
+                                        modifier = Modifier.size(44.dp)
+                                    ) {
+                                        Text("📊", fontSize = 18.sp)
+                                    }
+                                }
+                            }
+
+                            // Pop-up Dialog bei Aufgabe eines Mitspielers
+                            if (viewModel.showGiveUpDialog) {
+                                AlertDialog(
+                                    onDismissRequest = { viewModel.dismissGiveUpDialog() },
+                                    title = {
+                                        Text("Duell-Hinweis", color = Color.White, fontWeight = FontWeight.Bold)
+                                    },
+                                    text = {
+                                        Text(
+                                            "Spieler ${viewModel.opponentGaveUpName ?: "Ein Gegner"} hat das Duell aufgegeben.",
+                                            color = Color.White.copy(alpha = 0.9f),
+                                            fontSize = 14.sp
+                                        )
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = { viewModel.dismissGiveUpDialog() },
+                                            colors = ButtonDefaults.buttonColors(containerColor = TeRunBlue)
+                                        ) {
+                                            Text("Weiterspielen", color = Color.White)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        Button(
+                                            onClick = {
+                                                viewModel.duellBeenden(success = false, aufgegeben = true)
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f))
+                                        ) {
+                                            Text("Duell beenden", color = Color.White)
+                                        }
+                                    },
+                                    containerColor = DarkBackground,
+                                    shape = RoundedCornerShape(14.dp)
+                                )
                             }
 
 

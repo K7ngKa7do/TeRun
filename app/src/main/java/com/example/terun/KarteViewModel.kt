@@ -112,11 +112,17 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     val activeDuelInvitations = mutableStateMapOf<String, String>()     // Einladungs-Status pro Gegner: PENDING / ACCEPTED / DECLINED
     var toastMessage by mutableStateOf<String?>(null)                   // Kurze Statusmeldung für die UI (z.B. "Spieler X hat Spot erobert!")
 
+    var waitingForStart by mutableStateOf(false)                         // Eingeladener wartet auf Spielstart durch Ersteller
+    var opponentGaveUpName by mutableStateOf<String?>(null)              // Name des Gegners, der aufgegeben hat
+    var showGiveUpDialog by mutableStateOf(false)                        // Pop-up Dialog bei Aufgabe eines Mitspielers
+
     // Firestore Echtzeit-Listener: werden beim Start eines Duells aktiviert,
     // beim Beenden sauber abgemeldet (wichtig für Ressourcen-Management)
     private var duelInvitationsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var liveSessionListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var acceptedRequestsListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var incomingRequestsListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var duelStartListener: com.google.firebase.firestore.ListenerRegistration? = null
 
     // ==============================
     // Spielzustand
@@ -170,6 +176,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
             ladeAusstehendeFreundesanfragen()       // Offene Freundschaftsanfragen laden
             ladeDuellEinladungen()                  // Offene Duell-Einladungen laden
             starteBeobachtungAngenommeneAnfragen()  // Echtzeit-Listener starten
+            starteBeobachtungEingehendeAnfragen()   // Live-Empfang von Anfragen
         }
     }
 
@@ -228,6 +235,14 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Startet den Echtzeit-Empfang für neue Freundschaftsanfragen
+    fun starteBeobachtungEingehendeAnfragen() {
+        incomingRequestsListener?.remove()
+        incomingRequestsListener = repository.starteBeobachtungEingehendeAnfragen(repository.getAccountKey()) {
+            ladeAusstehendeFreundesanfragen()
+        }
+    }
+
     // Freund aus der beidseitigen Freundesliste entfernen
     fun loescheFreund(name: String) {
         viewModelScope.launch {
@@ -239,30 +254,34 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     // Lädt ausstehende Duell-Einladungen
     fun ladeDuellEinladungen() {
         val myName = spielerName
+        val myEmail = repository.getAccountKey()
         if (myName.isBlank() || !repository.networkMonitor.isOnline.value) return
         repository.firestore.collection("duels")
-            .whereEqualTo("invitations.$myName", "PENDING")
             .get()
             .addOnSuccessListener { result ->
                 ausstehendeDuellEinladungen.clear()
                 for (doc in result.documents) {
-                    val id = doc.getString("id") ?: ""
-                    val name = doc.getString("name") ?: ""
-                    val spotsAnzahl = doc.getLong("spotsAnzahl")?.toInt() ?: 1
-                    val zeitLimitMinuten = doc.getLong("zeitLimitMinuten")?.toInt() ?: 30
-                    val spot1Lat = doc.getDouble("spot1Lat") ?: 0.0
-                    val spot1Lng = doc.getDouble("spot1Lng") ?: 0.0
-                    val spot2Lat = doc.getDouble("spot2Lat") ?: 0.0
-                    val spot2Lng = doc.getDouble("spot2Lng") ?: 0.0
-                    val spot3Lat = doc.getDouble("spot3Lat") ?: 0.0
-                    val spot3Lng = doc.getDouble("spot3Lng") ?: 0.0
-                    val spot4Lat = doc.getDouble("spot4Lat") ?: 0.0
-                    val spot4Lng = doc.getDouble("spot4Lng") ?: 0.0
-                    val spot5Lat = doc.getDouble("spot5Lat") ?: 0.0
-                    val spot5Lng = doc.getDouble("spot5Lng") ?: 0.0
-                    val gegner = doc.getString("gegner") ?: ""
-                    val d = Duell(id, name, spotsAnzahl, zeitLimitMinuten, spot1Lat, spot1Lng, spot2Lat, spot2Lng, spot3Lat, spot3Lng, spot4Lat, spot4Lng, spot5Lat, spot5Lng, gegner)
-                    ausstehendeDuellEinladungen.add(d)
+                    val invitations = doc.get("invitations") as? Map<String, String> ?: emptyMap()
+                    val myStatus = invitations[myName] ?: invitations[myEmail]
+                    if (myStatus == "PENDING") {
+                        val id = doc.getString("id") ?: ""
+                        val name = doc.getString("name") ?: ""
+                        val spotsAnzahl = doc.getLong("spotsAnzahl")?.toInt() ?: 1
+                        val zeitLimitMinuten = doc.getLong("zeitLimitMinuten")?.toInt() ?: 30
+                        val spot1Lat = doc.getDouble("spot1Lat") ?: 0.0
+                        val spot1Lng = doc.getDouble("spot1Lng") ?: 0.0
+                        val spot2Lat = doc.getDouble("spot2Lat") ?: 0.0
+                        val spot2Lng = doc.getDouble("spot2Lng") ?: 0.0
+                        val spot3Lat = doc.getDouble("spot3Lat") ?: 0.0
+                        val spot3Lng = doc.getDouble("spot3Lng") ?: 0.0
+                        val spot4Lat = doc.getDouble("spot4Lat") ?: 0.0
+                        val spot4Lng = doc.getDouble("spot4Lng") ?: 0.0
+                        val spot5Lat = doc.getDouble("spot5Lat") ?: 0.0
+                        val spot5Lng = doc.getDouble("spot5Lng") ?: 0.0
+                        val gegner = doc.getString("gegner") ?: ""
+                        val d = Duell(id, name, spotsAnzahl, zeitLimitMinuten, spot1Lat, spot1Lng, spot2Lat, spot2Lng, spot3Lat, spot3Lng, spot4Lat, spot4Lng, spot5Lat, spot5Lng, gegner)
+                        ausstehendeDuellEinladungen.add(d)
+                    }
                 }
             }
     }
@@ -275,6 +294,17 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
             if (akzeptiert) {
                 repository.speichereDuell(duell)
                 ladeDuelle()
+                aktivesDuell = duell
+                waitingForStart = true
+
+                // Beobachte den automatischen Spielstart durch den Ersteller
+                duelStartListener?.remove()
+                duelStartListener = repository.beobachteSpielstart(duell.id) {
+                    duelStartListener?.remove()
+                    duelStartListener = null
+                    waitingForStart = false
+                    duellStarten(duell)
+                }
             }
         }
     }
@@ -410,6 +440,10 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     fun duellStarten(duell: Duell) {
         aktivesDuell = duell
         status = SpielStatus.LAEUFT
+        waitingForStart = false
+        showGiveUpDialog = false
+        repository.starteSpielInFirestore(duell.id)
+
         verbleibendeZeit = duell.zeitLimitMinuten * 60 // Minuten → Sekunden umrechnen
         // Alle Spots als nicht erreicht markieren
         spot1Captured = false
@@ -454,12 +488,23 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     fun duellBeenden(success: Boolean = false, aufgegeben: Boolean = false) {
         timerJob?.cancel()
         timerJob = null
+        waitingForStart = false
+        showGiveUpDialog = false
+        duelStartListener?.remove()
+        duelStartListener = null
 
-        stoppeLiveSessionBeobachtung()
         val active = aktivesDuell
         if (active != null) {
-            repository.loescheLiveSession(active.id)
+            if (aufgegeben) {
+                val pos = spielerPosition ?: LatLng(0.0, 0.0)
+                val score = (1..active.spotsAnzahl).count { capturedForIndex(it) }
+                repository.updateLiveSession(active.id, spielerName, pos.latitude, pos.longitude, score, giveUp = true)
+            } else {
+                repository.loescheLiveSession(active.id)
+            }
         }
+
+        stoppeLiveSessionBeobachtung()
 
         // Foreground Service für Hintergrundortung stoppen
         val context = getApplication<Application>().applicationContext
@@ -517,6 +562,8 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
     fun zurueckZurKarte() {
         timerJob?.cancel()
         timerJob = null
+        waitingForStart = false
+        showGiveUpDialog = false
         stoppeLiveSessionBeobachtung()
         val active = aktivesDuell
         if (active != null) {
@@ -525,6 +572,10 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         locationHelper.stopLocationUpdates()
         status = SpielStatus.IDLE
         aktivesDuell = null
+    }
+
+    fun dismissGiveUpDialog() {
+        showGiveUpDialog = false
     }
 
     // Beobachtet das gegnerische Tracking in Echtzeit
@@ -542,6 +593,12 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
                         val lat = (m["lat"] as? Number)?.toDouble() ?: 0.0
                         val lng = (m["lng"] as? Number)?.toDouble() ?: 0.0
                         val spots = (m["spotsCaptured"] as? Number)?.toInt() ?: 0
+                        val giveUp = (m["giveUp"] as? Boolean) ?: false
+
+                        if (giveUp && opponentGaveUpName != name) {
+                            opponentGaveUpName = name
+                            showGiveUpDialog = true
+                        }
 
                         val alterState = gegnerStati[name]
                         if (alterState != null && spots > alterState.second) {
@@ -684,6 +741,10 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         stoppeLiveSessionBeobachtung()          // Firestore-Listener für Multiplayer abmelden
         acceptedRequestsListener?.remove()      // Firestore-Listener für Freundschaftsanfragen
         acceptedRequestsListener = null
+        incomingRequestsListener?.remove()
+        incomingRequestsListener = null
+        duelStartListener?.remove()
+        duelStartListener = null
 
         // Foreground Location Service stoppen (VL 25 – Services)
         val context = getApplication<Application>().applicationContext
