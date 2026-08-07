@@ -569,34 +569,63 @@ class SpielRepository(private val context: Context) {
 
         if (networkMonitor.isOnline.value) {
             try {
-                firestore.collection("users").document(cleanEmail).delete()
+                // 1. User-Dokument synchron löschen
+                suspendCancellableCoroutine<Unit> { cont ->
+                    firestore.collection("users").document(cleanEmail).delete()
+                        .addOnCompleteListener { cont.resume(Unit) }
+                }
 
-                // Alle Anfragen in Firestore löschen, die zu diesem Nutzer gehören
-                firestore.collection("friend_requests").get()
-                    .addOnSuccessListener { snapshot ->
-                        for (doc in snapshot.documents) {
-                            val sEmail = (doc.getString("senderEmail") ?: "").lowercase()
-                            val sName = doc.getString("senderName") ?: ""
-                            val rEmail = (doc.getString("receiverEmail") ?: "").lowercase()
-                            val rName = doc.getString("receiverName") ?: ""
+                // 2. Anfragen in Firestore synchron löschen
+                val requestsToDelete = suspendCancellableCoroutine<List<com.google.firebase.firestore.DocumentReference>> { cont ->
+                    firestore.collection("friend_requests").get()
+                        .addOnCompleteListener { task ->
+                            if (task.isSuccessful && task.result != null) {
+                                val refs = task.result.documents.mapNotNull { doc ->
+                                    val sEmail = (doc.getString("senderEmail") ?: "").lowercase()
+                                    val sName = doc.getString("senderName") ?: ""
+                                    val rEmail = (doc.getString("receiverEmail") ?: "").lowercase()
+                                    val rName = doc.getString("receiverName") ?: ""
 
-                            if (sEmail == cleanEmail || rEmail == cleanEmail || sName.equals(myName, ignoreCase = true) || rName.equals(myName, ignoreCase = true)) {
-                                doc.reference.delete()
+                                    if (sEmail == cleanEmail || rEmail == cleanEmail ||
+                                        sName.equals(myName, ignoreCase = true) || rName.equals(myName, ignoreCase = true)) {
+                                        doc.reference
+                                    } else null
+                                }
+                                cont.resume(refs)
+                            } else {
+                                cont.resume(emptyList())
                             }
                         }
+                }
+                for (ref in requestsToDelete) {
+                    suspendCancellableCoroutine<Unit> { cont ->
+                        ref.delete().addOnCompleteListener { cont.resume(Unit) }
                     }
+                }
 
-                // Alle Freundschaften in Firestore löschen
-                firestore.collection("friends").get()
-                    .addOnSuccessListener { snapshot ->
-                        for (doc in snapshot.documents) {
-                            val oEmail = (doc.getString("ownerEmail") ?: "").lowercase()
-                            val fEmail = (doc.getString("friendEmail") ?: "").lowercase()
-                            if (oEmail == cleanEmail || fEmail == cleanEmail) {
-                                doc.reference.delete()
+                // 3. Freundschaften in Firestore synchron löschen
+                val friendsToDelete = suspendCancellableCoroutine<List<com.google.firebase.firestore.DocumentReference>> { cont ->
+                    firestore.collection("friends").get()
+                        .addOnCompleteListener { task ->
+                            if (task.isSuccessful && task.result != null) {
+                                val refs = task.result.documents.mapNotNull { doc ->
+                                    val oEmail = (doc.getString("ownerEmail") ?: "").lowercase()
+                                    val fEmail = (doc.getString("friendEmail") ?: "").lowercase()
+                                    if (oEmail == cleanEmail || fEmail == cleanEmail) {
+                                        doc.reference
+                                    } else null
+                                }
+                                cont.resume(refs)
+                            } else {
+                                cont.resume(emptyList())
                             }
                         }
+                }
+                for (ref in friendsToDelete) {
+                    suspendCancellableCoroutine<Unit> { cont ->
+                        ref.delete().addOnCompleteListener { cont.resume(Unit) }
                     }
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -933,23 +962,35 @@ class SpielRepository(private val context: Context) {
 
         if (networkMonitor.isOnline.value) {
             try {
-                firestore.collection("friend_requests").get()
-                    .addOnSuccessListener { snapshot ->
-                        for (doc in snapshot.documents) {
-                            val status = doc.getString("status") ?: ""
-                            if (status == "PENDING") {
-                                val sEmail = (doc.getString("senderEmail") ?: "").lowercase()
-                                val sName = doc.getString("senderName") ?: ""
-                                val rEmail = (doc.getString("receiverEmail") ?: "").lowercase()
-                                val rName = doc.getString("receiverName") ?: ""
+                val refsToDelete = suspendCancellableCoroutine<List<com.google.firebase.firestore.DocumentReference>> { cont ->
+                    firestore.collection("friend_requests").get()
+                        .addOnCompleteListener { task ->
+                            if (task.isSuccessful && task.result != null) {
+                                val list = task.result.documents.mapNotNull { doc ->
+                                    val status = doc.getString("status") ?: ""
+                                    if (status == "PENDING") {
+                                        val sEmail = (doc.getString("senderEmail") ?: "").lowercase()
+                                        val sName = doc.getString("senderName") ?: ""
+                                        val rEmail = (doc.getString("receiverEmail") ?: "").lowercase()
+                                        val rName = doc.getString("receiverName") ?: ""
 
-                                if (sEmail == cleanOwnerEmail || rEmail == cleanOwnerEmail ||
-                                    sName.equals(myName, ignoreCase = true) || rName.equals(myName, ignoreCase = true)) {
-                                    doc.reference.delete()
+                                        if (sEmail == cleanOwnerEmail || rEmail == cleanOwnerEmail ||
+                                            sName.equals(myName, ignoreCase = true) || rName.equals(myName, ignoreCase = true)) {
+                                            doc.reference
+                                        } else null
+                                    } else null
                                 }
+                                cont.resume(list)
+                            } else {
+                                cont.resume(emptyList())
                             }
                         }
+                }
+                for (ref in refsToDelete) {
+                    suspendCancellableCoroutine<Unit> { cont ->
+                        ref.delete().addOnCompleteListener { cont.resume(Unit) }
                     }
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
