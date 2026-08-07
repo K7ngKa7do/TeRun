@@ -441,6 +441,48 @@ fun KarteScreen(
                                 )
                             }
 
+                            // Pop-up Dialog bei neuer Freundschaftsanfrage in Echtzeit
+                            if (viewModel.showFriendRequestDialog) {
+                                val senderName = viewModel.incomingFriendRequestName ?: "Ein Spieler"
+                                AlertDialog(
+                                    onDismissRequest = { viewModel.dismissFriendRequestDialog() },
+                                    title = {
+                                        Text("📩 Neue Freundschaftsanfrage", color = Color.White, fontWeight = FontWeight.Bold)
+                                    },
+                                    text = {
+                                        Text(
+                                            "Spieler '$senderName' möchte sich mit dir befreunden!",
+                                            color = Color.White.copy(alpha = 0.9f),
+                                            fontSize = 14.sp
+                                        )
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                viewModel.antworteAufFreundesanfrage(senderName, akzeptiert = true)
+                                                viewModel.dismissFriendRequestDialog()
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color.Green.copy(alpha = 0.85f))
+                                        ) {
+                                            Text("Zustimmen", color = Color.White, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        Button(
+                                            onClick = {
+                                                viewModel.antworteAufFreundesanfrage(senderName, akzeptiert = false)
+                                                viewModel.dismissFriendRequestDialog()
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f))
+                                        ) {
+                                            Text("Ablehnen", color = Color.White)
+                                        }
+                                    },
+                                    containerColor = DarkBackground,
+                                    shape = RoundedCornerShape(14.dp)
+                                )
+                            }
+
 
                         }
 

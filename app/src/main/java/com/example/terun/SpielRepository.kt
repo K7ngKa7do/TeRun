@@ -256,13 +256,14 @@ class SpielRepository(private val context: Context) {
     fun speichereProfilFirestore(email: String, name: String) {
         if (!networkMonitor.isOnline.value) return
         val userMap = mapOf(
-            "email" to email,
+            "email" to email.trim().lowercase(),
             "name" to name,
+            "name_lowercase" to name.trim().lowercase(),
             "gesamtDistanz" to ladeGesamtDistanz(),
             "absolvierteDuelleCount" to ladeAbsolvierteDuelleCount()
         )
         try {
-            firestore.collection("users").document(email).set(userMap)
+            firestore.collection("users").document(email.trim().lowercase()).set(userMap)
                 .addOnFailureListener { it.printStackTrace() }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -558,10 +559,48 @@ class SpielRepository(private val context: Context) {
         lokaleNamen
     }
 
-    // Konto vollständig löschen: Benutzer-Zeile + alle Freundschafts-Einträge entfernen
+    // Konto vollständig löschen: Benutzer-Zeile + alle Freundschafts-Einträge lokal und in Firestore entfernen
     suspend fun loescheKonto(email: String) = withContext(Dispatchers.IO) {
-        dao.deleteBenutzerByEmail(email)
-        dao.deleteFreundeByEmail(email)
+        val cleanEmail = email.trim().lowercase()
+        val myName = ladeSpielerName()
+
+        dao.deleteBenutzerByEmail(cleanEmail)
+        dao.deleteFreundeByEmail(cleanEmail)
+
+        if (networkMonitor.isOnline.value) {
+            try {
+                firestore.collection("users").document(cleanEmail).delete()
+
+                // Alle Anfragen in Firestore löschen, die zu diesem Nutzer gehören
+                firestore.collection("friend_requests").get()
+                    .addOnSuccessListener { snapshot ->
+                        for (doc in snapshot.documents) {
+                            val sEmail = (doc.getString("senderEmail") ?: "").lowercase()
+                            val sName = doc.getString("senderName") ?: ""
+                            val rEmail = (doc.getString("receiverEmail") ?: "").lowercase()
+                            val rName = doc.getString("receiverName") ?: ""
+
+                            if (sEmail == cleanEmail || rEmail == cleanEmail || sName.equals(myName, ignoreCase = true) || rName.equals(myName, ignoreCase = true)) {
+                                doc.reference.delete()
+                            }
+                        }
+                    }
+
+                // Alle Freundschaften in Firestore löschen
+                firestore.collection("friends").get()
+                    .addOnSuccessListener { snapshot ->
+                        for (doc in snapshot.documents) {
+                            val oEmail = (doc.getString("ownerEmail") ?: "").lowercase()
+                            val fEmail = (doc.getString("friendEmail") ?: "").lowercase()
+                            if (oEmail == cleanEmail || fEmail == cleanEmail) {
+                                doc.reference.delete()
+                            }
+                        }
+                    }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     // ==========================================================================
@@ -571,15 +610,16 @@ class SpielRepository(private val context: Context) {
     // Alle Freunde des Spielers laden und deren Anzeigenamen zurückgeben
     // Freundschaften sind in der DB beidseitig gespeichert (ownerEmail ↔ friendEmail)
     suspend fun holeFreunde(ownerEmail: String): List<String> = withContext(Dispatchers.IO) {
+        val cleanOwnerEmail = ownerEmail.trim().lowercase()
         if (networkMonitor.isOnline.value) {
             try {
                 val serverFriendEmails = suspendCancellableCoroutine<List<String>> { continuation ->
                     firestore.collection("friends")
-                        .whereEqualTo("ownerEmail", ownerEmail)
+                        .whereEqualTo("ownerEmail", cleanOwnerEmail)
                         .get()
                         .addOnCompleteListener { task ->
                             if (task.isSuccessful) {
-                                val list = task.result.mapNotNull { it.getString("friendEmail") }
+                                val list = task.result.mapNotNull { it.getString("friendEmail")?.lowercase() }
                                 continuation.resume(list)
                             } else {
                                 continuation.resume(emptyList())
@@ -588,7 +628,7 @@ class SpielRepository(private val context: Context) {
                 }
                 for (fEmail in serverFriendEmails) {
                     if (fEmail.isNotBlank()) {
-                        dao.insertFreund(FreundEntity(ownerEmail, fEmail))
+                        dao.insertFreund(FreundEntity(cleanOwnerEmail, fEmail, "ACCEPTED"))
                     }
                 }
             } catch (e: Exception) {
@@ -596,7 +636,7 @@ class SpielRepository(private val context: Context) {
             }
         }
 
-        dao.getFreundeByOwner(ownerEmail).mapNotNull { friend ->
+        dao.getFreundeByOwner(cleanOwnerEmail).mapNotNull { friend ->
             val localUser = dao.getBenutzerByEmail(friend.friendEmail)
             if (localUser != null) {
                 localUser.name
@@ -624,30 +664,48 @@ class SpielRepository(private val context: Context) {
             } else {
                 friend.friendEmail.substringBefore("@")
             }
-        }
+        }.distinct()
     }
 
     // Freundschaftsanfrage senden
     suspend fun fuegeFreundHinzu(ownerEmail: String, friendName: String): String =
         withContext(Dispatchers.IO) {
-            var friendUser = dao.getBenutzerByName(friendName)
+            val cleanOwnerEmail = ownerEmail.trim().lowercase()
+            val cleanFriendName = friendName.trim()
+            val cleanFriendNameLower = cleanFriendName.lowercase()
+
+            var friendUser = dao.getBenutzerByName(cleanFriendName)
             if (friendUser == null && networkMonitor.isOnline.value) {
                 try {
                     val onlineUser = suspendCancellableCoroutine<BenutzerEntity?> { continuation ->
                         firestore.collection("users")
-                            .whereEqualTo("name", friendName)
+                            .whereEqualTo("name_lowercase", cleanFriendNameLower)
                             .limit(1)
                             .get()
-                            .addOnCompleteListener { task ->
-                                if (task.isSuccessful && !task.result.isEmpty) {
-                                    val doc = task.result.documents[0]
+                            .addOnSuccessListener { r ->
+                                if (!r.isEmpty) {
+                                    val doc = r.documents[0]
                                     val email = doc.getString("email") ?: ""
                                     val name = doc.getString("name") ?: ""
                                     continuation.resume(BenutzerEntity(email, name, ""))
                                 } else {
-                                    continuation.resume(null)
+                                    firestore.collection("users")
+                                        .whereEqualTo("name", cleanFriendName)
+                                        .limit(1)
+                                        .get()
+                                        .addOnCompleteListener { t2 ->
+                                            if (t2.isSuccessful && !t2.result.isEmpty) {
+                                                val doc = t2.result.documents[0]
+                                                val email = doc.getString("email") ?: ""
+                                                val name = doc.getString("name") ?: ""
+                                                continuation.resume(BenutzerEntity(email, name, ""))
+                                            } else {
+                                                continuation.resume(null)
+                                            }
+                                        }
                                 }
                             }
+                            .addOnFailureListener { continuation.resume(null) }
                     }
                     if (onlineUser != null) {
                         dao.insertBenutzer(onlineUser)
@@ -659,48 +717,55 @@ class SpielRepository(private val context: Context) {
             }
 
             if (friendUser == null) return@withContext "USER_NOT_FOUND"
-            val friendEmail = friendUser.email
-            if (ownerEmail == friendEmail) return@withContext "SELF_REQUEST"
+            val friendEmail = friendUser.email.trim().lowercase()
+            val friendActualName = friendUser.name
+            if (cleanOwnerEmail == friendEmail) return@withContext "SELF_REQUEST"
+
+            val myName = ladeSpielerName()
+            val docId = if (cleanOwnerEmail < friendEmail) "${cleanOwnerEmail}_${friendEmail}" else "${friendEmail}_${cleanOwnerEmail}"
 
             // 1. Lokale DB auf existierende Verbindung prüfen
-            val lokaleFreundschaft = dao.getFreundschaft(ownerEmail, friendEmail)
+            val lokaleFreundschaft = dao.getFreundschaft(cleanOwnerEmail, friendEmail)
             if (lokaleFreundschaft != null) {
-                return@withContext when (lokaleFreundschaft.status) {
-                    "ACCEPTED" -> "ALREADY_FRIENDS"
-                    "SENT_PENDING" -> "ALREADY_SENT"
+                when (lokaleFreundschaft.status) {
+                    "ACCEPTED" -> return@withContext "ALREADY_FRIENDS"
+                    "SENT_PENDING" -> return@withContext "ALREADY_SENT"
                     "RECEIVED_PENDING" -> {
-                        // Wenn der andere User mir bereits eine Anfrage geschickt hat, nehmen wir diese automatisch an
-                        val otherName = friendUser.name
-                        antworteAufFreundesanfrage(ownerEmail, otherName, akzeptiert = true)
-                        "SUCCESS"
+                        antworteAufFreundesanfrage(cleanOwnerEmail, friendActualName, akzeptiert = true)
+                        return@withContext "SUCCESS"
                     }
-                    else -> "ALREADY_SENT"
                 }
             }
 
             // 2. Firestore auf existierende Verbindung prüfen (falls online)
             if (networkMonitor.isOnline.value) {
                 try {
-                    val firestoreRequest = suspendCancellableCoroutine<String?> { continuation ->
-                        firestore.collection("friend_requests")
-                            .document("${ownerEmail}_$friendEmail")
-                            .get()
-                            .addOnCompleteListener { task ->
-                                if (task.isSuccessful && task.result != null && task.result.exists()) {
-                                    continuation.resume(task.result.getString("status"))
+                    val existingDoc = suspendCancellableCoroutine<com.google.firebase.firestore.DocumentSnapshot?> { continuation ->
+                        firestore.collection("friend_requests").document(docId).get()
+                            .addOnCompleteListener { t ->
+                                if (t.isSuccessful && t.result != null && t.result.exists()) {
+                                    continuation.resume(t.result)
                                 } else {
                                     continuation.resume(null)
                                 }
                             }
                     }
-                    if (firestoreRequest != null) {
-                        return@withContext if (firestoreRequest == "ACCEPTED") {
-                            dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
-                            dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = ownerEmail, status = "ACCEPTED"))
-                            "ALREADY_FRIENDS"
-                        } else {
-                            dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
-                            "ALREADY_SENT"
+                    if (existingDoc != null) {
+                        val status = existingDoc.getString("status") ?: ""
+                        val senderEmail = (existingDoc.getString("senderEmail") ?: "").lowercase()
+                        if (status == "ACCEPTED") {
+                            dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
+                            dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
+                            return@withContext "ALREADY_FRIENDS"
+                        } else if (status == "PENDING") {
+                            if (senderEmail == cleanOwnerEmail) {
+                                dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
+                                return@withContext "ALREADY_SENT"
+                            } else {
+                                // Der andere Nutzer hat mich bereits angefragt -> Automatisch annehmen!
+                                antworteAufFreundesanfrage(cleanOwnerEmail, friendActualName, akzeptiert = true)
+                                return@withContext "SUCCESS"
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -709,20 +774,20 @@ class SpielRepository(private val context: Context) {
             }
 
             // Lokalen Eintrag als PENDING speichern
-            dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
+            dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
 
             if (networkMonitor.isOnline.value) {
                 try {
                     val requestMap = mapOf(
-                        "senderEmail" to ownerEmail,
-                        "senderName" to ladeSpielerName(),
+                        "senderEmail" to cleanOwnerEmail,
+                        "senderName" to myName,
                         "receiverEmail" to friendEmail,
+                        "receiverName" to friendActualName,
                         "status" to "PENDING"
                     )
-                    // Auf Firestore-Write warten, damit die Anfrage sicher ankommt
                     suspendCancellableCoroutine<Boolean> { continuation ->
                         firestore.collection("friend_requests")
-                            .document("${ownerEmail}_$friendEmail")
+                            .document(docId)
                             .set(requestMap)
                             .addOnSuccessListener { continuation.resume(true) }
                             .addOnFailureListener { e ->
@@ -739,23 +804,33 @@ class SpielRepository(private val context: Context) {
 
     // Holt ausstehende Freundschaftsanfragen für den angemeldeten Benutzer
     suspend fun holeAusstehendeFreundesanfragen(ownerEmail: String): List<String> = withContext(Dispatchers.IO) {
+        val cleanOwnerEmail = ownerEmail.trim().lowercase()
+        val myName = ladeSpielerName()
+
         if (!networkMonitor.isOnline.value) {
-            return@withContext dao.getPendingRequestsByOwner(ownerEmail).mapNotNull { pending ->
+            return@withContext dao.getPendingRequestsByOwner(cleanOwnerEmail).mapNotNull { pending ->
                 dao.getBenutzerByEmail(pending.friendEmail)?.name ?: pending.friendEmail
             }
         }
         try {
             val pendingSenders = suspendCancellableCoroutine<List<Pair<String, String>>> { continuation ->
                 firestore.collection("friend_requests")
-                    .whereEqualTo("receiverEmail", ownerEmail)
                     .whereEqualTo("status", "PENDING")
                     .get()
                     .addOnCompleteListener { task ->
                         if (task.isSuccessful) {
                             val list = task.result.mapNotNull { doc ->
-                                val email = doc.getString("senderEmail") ?: ""
-                                val name = doc.getString("senderName") ?: ""
-                                if (email.isNotBlank() && name.isNotBlank()) email to name else null
+                                val sEmail = (doc.getString("senderEmail") ?: "").lowercase()
+                                val sName = doc.getString("senderName") ?: ""
+                                val rEmail = (doc.getString("receiverEmail") ?: "").lowercase()
+                                val rName = doc.getString("receiverName") ?: ""
+
+                                val isForMe = (rEmail == cleanOwnerEmail || rEmail == myName.lowercase() || rName.equals(myName, ignoreCase = true) || rName.equals(cleanOwnerEmail, ignoreCase = true))
+                                val isNotFromMe = (sEmail != cleanOwnerEmail && !sName.equals(myName, ignoreCase = true))
+
+                                if (isForMe && isNotFromMe && sName.isNotBlank()) {
+                                    sEmail to sName
+                                } else null
                             }
                             continuation.resume(list)
                         } else {
@@ -766,10 +841,10 @@ class SpielRepository(private val context: Context) {
 
             for ((senderEmail, senderName) in pendingSenders) {
                 dao.insertBenutzer(BenutzerEntity(senderEmail, senderName, ""))
-                dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = senderEmail, status = "RECEIVED_PENDING"))
+                dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = senderEmail, status = "RECEIVED_PENDING"))
             }
 
-            pendingSenders.map { it.second }
+            pendingSenders.map { it.second }.distinct()
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
@@ -778,32 +853,57 @@ class SpielRepository(private val context: Context) {
 
     // Antwortet auf eine Freundschaftsanfrage
     suspend fun antworteAufFreundesanfrage(ownerEmail: String, senderName: String, akzeptiert: Boolean) = withContext(Dispatchers.IO) {
-        val senderUser = dao.getBenutzerByName(senderName) ?: return@withContext
-        val senderEmail = senderUser.email
-        val documentId = "${senderEmail}_$ownerEmail"
+        val cleanOwnerEmail = ownerEmail.trim().lowercase()
+        var senderUser = dao.getBenutzerByName(senderName)
+        var senderEmail = senderUser?.email?.trim()?.lowercase() ?: ""
+
+        if (senderEmail.isBlank() && networkMonitor.isOnline.value) {
+            try {
+                val foundEmail = suspendCancellableCoroutine<String?> { continuation ->
+                    firestore.collection("users")
+                        .whereEqualTo("name_lowercase", senderName.trim().lowercase())
+                        .limit(1)
+                        .get()
+                        .addOnSuccessListener { r ->
+                            if (!r.isEmpty) continuation.resume(r.documents[0].getString("email"))
+                            else continuation.resume(null)
+                        }
+                        .addOnFailureListener { continuation.resume(null) }
+                }
+                if (foundEmail != null) {
+                    senderEmail = foundEmail.trim().lowercase()
+                    dao.insertBenutzer(BenutzerEntity(senderEmail, senderName, ""))
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        if (senderEmail.isBlank()) return@withContext
+        val docId = if (cleanOwnerEmail < senderEmail) "${cleanOwnerEmail}_${senderEmail}" else "${senderEmail}_${cleanOwnerEmail}"
 
         if (akzeptiert) {
-            dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = senderEmail, status = "ACCEPTED"))
-            dao.insertFreund(FreundEntity(ownerEmail = senderEmail, friendEmail = ownerEmail, status = "ACCEPTED"))
+            dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = senderEmail, status = "ACCEPTED"))
+            dao.insertFreund(FreundEntity(ownerEmail = senderEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
 
             if (networkMonitor.isOnline.value) {
                 try {
-                    firestore.collection("friend_requests").document(documentId).update("status", "ACCEPTED")
+                    firestore.collection("friend_requests").document(docId).update("status", "ACCEPTED")
 
-                    val map1 = mapOf("ownerEmail" to ownerEmail, "friendEmail" to senderEmail)
-                    val map2 = mapOf("ownerEmail" to senderEmail, "friendEmail" to ownerEmail)
-                    firestore.collection("friends").document("${ownerEmail}_$senderEmail").set(map1)
-                    firestore.collection("friends").document("${senderEmail}_$ownerEmail").set(map2)
+                    val map1 = mapOf("ownerEmail" to cleanOwnerEmail, "friendEmail" to senderEmail)
+                    val map2 = mapOf("ownerEmail" to senderEmail, "friendEmail" to cleanOwnerEmail)
+                    firestore.collection("friends").document("${cleanOwnerEmail}_$senderEmail").set(map1)
+                    firestore.collection("friends").document("${senderEmail}_$cleanOwnerEmail").set(map2)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
             }
         } else {
-            dao.deleteFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = senderEmail, status = "RECEIVED_PENDING"))
+            dao.deleteFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = senderEmail, status = "RECEIVED_PENDING"))
 
             if (networkMonitor.isOnline.value) {
                 try {
-                    firestore.collection("friend_requests").document(documentId).delete()
+                    firestore.collection("friend_requests").document(docId).delete()
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -1012,11 +1112,13 @@ class SpielRepository(private val context: Context) {
     }
 
     // Beobachtet in Echtzeit, ob dieser Nutzer neue Freundschaftsanfragen erhält
-    fun starteBeobachtungEingehendeAnfragen(ownerEmail: String, onRequestReceived: () -> Unit): com.google.firebase.firestore.ListenerRegistration? {
+    fun starteBeobachtungEingehendeAnfragen(ownerEmail: String, onRequestReceived: (senderName: String) -> Unit): com.google.firebase.firestore.ListenerRegistration? {
         if (!networkMonitor.isOnline.value) return null
+        val cleanOwnerEmail = ownerEmail.trim().lowercase()
+        val myName = ladeSpielerName()
+
         return try {
             firestore.collection("friend_requests")
-                .whereEqualTo("receiverEmail", ownerEmail)
                 .whereEqualTo("status", "PENDING")
                 .addSnapshotListener { snapshots, error ->
                     if (error != null) {
@@ -1024,7 +1126,25 @@ class SpielRepository(private val context: Context) {
                         return@addSnapshotListener
                     }
                     if (snapshots != null && !snapshots.isEmpty) {
-                        onRequestReceived()
+                        for (doc in snapshots.documentChanges) {
+                            if (doc.type == com.google.firebase.firestore.DocumentChange.Type.ADDED ||
+                                doc.type == com.google.firebase.firestore.DocumentChange.Type.MODIFIED) {
+                                val d = doc.document
+                                val sEmail = (d.getString("senderEmail") ?: "").lowercase()
+                                val sName = d.getString("senderName") ?: ""
+                                val rEmail = (d.getString("receiverEmail") ?: "").lowercase()
+                                val rName = d.getString("receiverName") ?: ""
+
+                                val isForMe = (rEmail == cleanOwnerEmail || rEmail == myName.lowercase() || rName.equals(myName, ignoreCase = true) || rName.equals(cleanOwnerEmail, ignoreCase = true))
+                                val isNotFromMe = (sEmail != cleanOwnerEmail && !sName.equals(myName, ignoreCase = true))
+
+                                if (isForMe && isNotFromMe && sName.isNotBlank()) {
+                                    CoroutineScope(Dispatchers.Main).launch {
+                                        onRequestReceived(sName)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
         } catch (e: Exception) {

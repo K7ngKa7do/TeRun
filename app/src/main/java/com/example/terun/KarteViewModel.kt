@@ -235,11 +235,21 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    var incomingFriendRequestName by mutableStateOf<String?>(null)
+    var showFriendRequestDialog by mutableStateOf(false)
+
+    fun dismissFriendRequestDialog() {
+        showFriendRequestDialog = false
+        incomingFriendRequestName = null
+    }
+
     // Startet den Echtzeit-Empfang für neue Freundschaftsanfragen
     fun starteBeobachtungEingehendeAnfragen() {
         incomingRequestsListener?.remove()
-        incomingRequestsListener = repository.starteBeobachtungEingehendeAnfragen(repository.getAccountKey()) {
+        incomingRequestsListener = repository.starteBeobachtungEingehendeAnfragen(repository.getAccountKey()) { senderName ->
             ladeAusstehendeFreundesanfragen()
+            incomingFriendRequestName = senderName
+            showFriendRequestDialog = true
         }
     }
 
