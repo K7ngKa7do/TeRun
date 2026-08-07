@@ -729,7 +729,6 @@ class SpielRepository(private val context: Context) {
             if (lokaleFreundschaft != null) {
                 when (lokaleFreundschaft.status) {
                     "ACCEPTED" -> return@withContext "ALREADY_FRIENDS"
-                    "SENT_PENDING" -> return@withContext "ALREADY_SENT"
                     "RECEIVED_PENDING" -> {
                         antworteAufFreundesanfrage(cleanOwnerEmail, friendActualName, akzeptiert = true)
                         return@withContext "SUCCESS"
@@ -757,15 +756,10 @@ class SpielRepository(private val context: Context) {
                             dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
                             dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
                             return@withContext "ALREADY_FRIENDS"
-                        } else if (status == "PENDING") {
-                            if (senderEmail == cleanOwnerEmail) {
-                                dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
-                                return@withContext "ALREADY_SENT"
-                            } else {
-                                // Der andere Nutzer hat mich bereits angefragt -> Automatisch annehmen!
-                                antworteAufFreundesanfrage(cleanOwnerEmail, friendActualName, akzeptiert = true)
-                                return@withContext "SUCCESS"
-                            }
+                        } else if (status == "PENDING" && senderEmail != cleanOwnerEmail) {
+                            // Der andere Nutzer hat mich bereits angefragt -> Automatisch annehmen!
+                            antworteAufFreundesanfrage(cleanOwnerEmail, friendActualName, akzeptiert = true)
+                            return@withContext "SUCCESS"
                         }
                     }
                 } catch (e: Exception) {
@@ -783,7 +777,8 @@ class SpielRepository(private val context: Context) {
                         "senderName" to myName,
                         "receiverEmail" to friendEmail,
                         "receiverName" to friendActualName,
-                        "status" to "PENDING"
+                        "status" to "PENDING",
+                        "timestamp" to System.currentTimeMillis()
                     )
                     suspendCancellableCoroutine<Boolean> { continuation ->
                         firestore.collection("friend_requests")
@@ -801,6 +796,12 @@ class SpielRepository(private val context: Context) {
             }
             "SUCCESS"
         }
+
+    // Löscht veraltete Hängengebliebene ausstehende Anfragen im lokalen Cache
+    suspend fun bereinigeAusstehendeAnfragen(ownerEmail: String) = withContext(Dispatchers.IO) {
+        val cleanEmail = ownerEmail.trim().lowercase()
+        dao.deletePendingFreundeByOwner(cleanEmail)
+    }
 
     // Holt ausstehende Freundschaftsanfragen für den angemeldeten Benutzer
     suspend fun holeAusstehendeFreundesanfragen(ownerEmail: String): List<String> = withContext(Dispatchers.IO) {

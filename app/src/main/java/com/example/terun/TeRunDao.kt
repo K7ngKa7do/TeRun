@@ -140,6 +140,9 @@ interface TeRunDao {
     @Query("SELECT * FROM freunde WHERE LOWER(ownerEmail) = LOWER(:ownerEmail) AND LOWER(friendEmail) = LOWER(:friendEmail) LIMIT 1")
     fun getFreundschaft(ownerEmail: String, friendEmail: String): FreundEntity?
 
+    @Query("DELETE FROM freunde WHERE LOWER(ownerEmail) = LOWER(:ownerEmail) AND status != 'ACCEPTED'")
+    fun deletePendingFreundeByOwner(ownerEmail: String): Int
+
     /**
      * Freundschaftseintrag speichern.
      * REPLACE → falls bereits ein Eintrag mit gleichen Schlüsseln existiert, wird er überschrieben.

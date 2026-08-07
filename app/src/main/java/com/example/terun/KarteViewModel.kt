@@ -172,6 +172,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
 
         // Freunde, Anfragen und Einladungen von Firestore laden
         viewModelScope.launch {
+            repository.bereinigeAusstehendeAnfragen(repository.getAccountKey())
             freunde.addAll(repository.holeFreunde(repository.getAccountKey()))
             ladeAusstehendeFreundesanfragen()       // Offene Freundschaftsanfragen laden
             ladeDuellEinladungen()                  // Offene Duell-Einladungen laden
