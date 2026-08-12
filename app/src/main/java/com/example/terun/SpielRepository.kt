@@ -676,14 +676,16 @@ class SpielRepository(private val context: Context) {
             }
         }
 
-        dao.getFreundeByOwner(cleanOwnerEmail).mapNotNull { friend ->
-            val localUser = dao.getBenutzerByEmail(friend.friendEmail)
+        // Raum DB abfragen & Doppler per .distinct() strikt entfernen
+        val namesList = dao.getFreundeByOwner(cleanOwnerEmail).mapNotNull { friend ->
+            val cleanFriendEmail = friend.friendEmail.trim().lowercase()
+            val localUser = dao.getBenutzerByEmail(cleanFriendEmail)
             if (localUser != null) {
                 localUser.name
             } else if (networkMonitor.isOnline.value) {
                 try {
                     val fireName = suspendCancellableCoroutine<String?> { continuation ->
-                        firestore.collection("users").document(friend.friendEmail).get()
+                        firestore.collection("users").document(cleanFriendEmail).get()
                             .addOnCompleteListener { task ->
                                 if (task.isSuccessful && task.result != null) {
                                     continuation.resume(task.result.getString("name"))
@@ -693,18 +695,21 @@ class SpielRepository(private val context: Context) {
                             }
                     }
                     if (fireName != null) {
-                        dao.insertBenutzer(BenutzerEntity(friend.friendEmail, fireName, ""))
+                        dao.insertBenutzer(BenutzerEntity(cleanFriendEmail, fireName, ""))
                         fireName
                     } else {
-                        friend.friendEmail.substringBefore("@")
+                        cleanFriendEmail.substringBefore("@")
                     }
                 } catch (e: Exception) {
-                    friend.friendEmail.substringBefore("@")
+                    cleanFriendEmail.substringBefore("@")
                 }
             } else {
-                friend.friendEmail.substringBefore("@")
+                cleanFriendEmail.substringBefore("@")
             }
-        }.distinct()
+        }
+
+        // Duplikate (z.B. durch Groß-/Kleinschreibung) strikt herausfiltern
+        namesList.distinct()
     }
 
     // Freundschaftsanfrage senden
