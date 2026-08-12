@@ -381,17 +381,18 @@ class SpielRepository(private val context: Context) {
                     .addOnCompleteListener { task ->
                         if (task.isSuccessful) {
                             val list = mutableListOf<Duell>()
-                            val myEmail = getAccountKey()
-                            val myName = ladeSpielerName()
+                            val myEmail = getAccountKey().trim().lowercase()
+                            val myName = ladeSpielerName().trim().lowercase()
                             for (doc in task.result) {
-                                val creator = doc.getString("creator") ?: ""
+                                val creator = (doc.getString("creator") ?: "").trim().lowercase()
+                                val creatorName = (doc.getString("creatorName") ?: "").trim().lowercase()
                                 val gegnerStr = doc.getString("gegner") ?: ""
-                                val invitations = doc.get("invitations") as? Map<String, String> ?: emptyMap()
-                                val myInvitationStatus = invitations[myName] ?: invitations[myEmail]
 
-                                // Ein Duell gehört nur unter "Verfügbare Duelle", wenn ich der Ersteller bin
-                                // ODER wenn ich eingeladen wurde UND die Einladung ACCEPTED habe.
-                                if (creator == myEmail || myInvitationStatus == "ACCEPTED") {
+                                // "Verfügbare Duelle" gehören AUSSCHLIESSLICH dem Ersteller des Duells.
+                                // Eingeladene Nutzer sehen Duelle NICHT in "Verfügbare Duelle".
+                                val isCreator = (creator == myEmail || creator == myName || creatorName == myName) && creator.isNotBlank()
+
+                                if (isCreator) {
                                     list.add(
                                         Duell(
                                             id = doc.id,

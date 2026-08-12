@@ -333,8 +333,8 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
             repository.antworteAufDuellEinladung(duell.id, akzeptiert)
             ladeDuellEinladungen()
             if (akzeptiert) {
-                repository.speichereDuell(duell)
-                ladeDuelle()
+                // Das Duell wird NICHT in "verfügbare Duelle" beim Eingeladenen gelistet!
+                // Es wird direkt als aktives Duell gesetzt und wartet auf den Start durch den Ersteller.
                 aktivesDuell = duell
                 waitingForStart = true
 

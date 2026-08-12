@@ -307,11 +307,14 @@ fun KarteScreen(
                                     viewModel.spot5Captured
                                 ).take(active.spotsAnzahl).count { it }
 
-                                GlassmorphicCard(
+                                Surface(
                                     modifier = Modifier
                                         .align(Alignment.BottomEnd)
                                         .padding(bottom = 80.dp, end = 14.dp)
-                                        .width(220.dp)
+                                        .width(230.dp),
+                                    color = DarkBackground, // Solider dunkler Hintergrund für 100% Lesbarkeit über der Karte
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.5.dp, SpotOrange)
                                 ) {
                                     Column(modifier = Modifier.padding(12.dp)) {
                                         Row(
@@ -319,18 +322,36 @@ fun KarteScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("📊 Punkte-Stand", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                            Text("📊 Punktestand", color = SpotOrange, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                             IconButton(
                                                 onClick = { showScoreOverlay = false },
                                                 modifier = Modifier.size(24.dp)
                                             ) {
-                                                Icon(Icons.Default.Close, contentDescription = "Schließen", tint = Color.White.copy(alpha = 0.7f))
+                                                Icon(Icons.Default.Close, contentDescription = "Schließen", tint = Color.White)
                                             }
                                         }
                                         Spacer(modifier = Modifier.height(8.dp))
-                                        Text("Du (${viewModel.spielerName}): $myScore / ${active.spotsAnzahl} Spots", color = TeRunBlue, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                        HorizontalDivider(color = Color.White.copy(alpha = 0.15f), thickness = 1.dp)
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        // Eigener Punktestand (Hellgrün, extrem gut lesbar)
+                                        Text(
+                                            text = "Du (${viewModel.spielerName}): $myScore / ${active.spotsAnzahl} Spots",
+                                            color = Color(0xFF4ADE80),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+
+                                        // Gegner-Punktestände (SpotOrange, klar und kontrastreich)
                                         viewModel.gegnerStati.forEach { (name, statePair) ->
-                                            Text("$name: ${statePair.second} / ${active.spotsAnzahl} Spots", color = Color.White.copy(alpha = 0.9f), fontSize = 13.sp)
+                                            Text(
+                                                text = "$name: ${statePair.second} / ${active.spotsAnzahl} Spots",
+                                                color = SpotOrange,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
                                         }
                                     }
                                 }
