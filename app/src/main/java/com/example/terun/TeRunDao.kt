@@ -143,6 +143,11 @@ interface TeRunDao {
     @Query("DELETE FROM freunde WHERE LOWER(ownerEmail) = LOWER(:ownerEmail) AND status != 'ACCEPTED'")
     fun deletePendingFreundeByOwner(ownerEmail: String): Int
 
+    // Löscht nur gesendete ausstehende Anfragen (SENT_PENDING) beim App-Start.
+    // RECEIVED_PENDING Einträge (eingehende Anfragen) werden bewusst NICHT gelöscht.
+    @Query("DELETE FROM freunde WHERE LOWER(ownerEmail) = LOWER(:ownerEmail) AND status = 'SENT_PENDING'")
+    fun deleteSentPendingByOwner(ownerEmail: String): Int
+
     /**
      * Freundschaftseintrag speichern.
      * REPLACE → falls bereits ein Eintrag mit gleichen Schlüsseln existiert, wird er überschrieben.

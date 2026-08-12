@@ -827,15 +827,16 @@ class SpielRepository(private val context: Context) {
         }
 
     // Löscht veraltete Hängengebliebene ausstehende Anfragen im lokalen Cache
+    // Bereinigt beim App-Start nur die gesendeten, noch ausstehenden Anfragen im lokalen Cache.
+    // RECEIVED_PENDING Einträge werden NICHT gelöscht, damit die Freundesliste korrekt bleibt.
     suspend fun bereinigeAusstehendeAnfragen(ownerEmail: String) = withContext(Dispatchers.IO) {
         val cleanEmail = ownerEmail.trim().lowercase()
-        dao.deletePendingFreundeByOwner(cleanEmail)
+        dao.deleteSentPendingByOwner(cleanEmail)
     }
 
     // Holt ausstehende Freundschaftsanfragen für den angemeldeten Benutzer
     suspend fun holeAusstehendeFreundesanfragen(ownerEmail: String): List<String> = withContext(Dispatchers.IO) {
         val cleanOwnerEmail = ownerEmail.trim().lowercase()
-        val myName = ladeSpielerName()
 
         if (!networkMonitor.isOnline.value) {
             return@withContext dao.getPendingRequestsByOwner(cleanOwnerEmail).mapNotNull { pending ->
@@ -844,23 +845,21 @@ class SpielRepository(private val context: Context) {
         }
         try {
             val pendingSenders = suspendCancellableCoroutine<List<Pair<String, String>>> { continuation ->
+                // Direkter Firestore-Query auf receiverEmail: keine fehleranfällige Client-seitige Filterung mehr
                 firestore.collection("friend_requests")
                     .whereEqualTo("status", "PENDING")
+                    .whereEqualTo("receiverEmail", cleanOwnerEmail)
                     .get()
                     .addOnCompleteListener { task ->
                         if (task.isSuccessful) {
                             val list = task.result.mapNotNull { doc ->
                                 val sEmail = (doc.getString("senderEmail") ?: "").lowercase()
                                 val sName = doc.getString("senderName") ?: ""
-                                val rEmail = (doc.getString("receiverEmail") ?: "").lowercase()
-                                val rName = doc.getString("receiverName") ?: ""
 
-                                val isForMe = (rEmail == cleanOwnerEmail || rEmail == myName.lowercase() || rName.equals(myName, ignoreCase = true) || rName.equals(cleanOwnerEmail, ignoreCase = true))
-                                val isNotFromMe = (sEmail != cleanOwnerEmail && !sName.equals(myName, ignoreCase = true))
+                                // Nur Anfragen, die nicht von mir selbst stammen
+                                val isNotFromMe = sEmail != cleanOwnerEmail && sName.isNotBlank()
 
-                                if (isForMe && isNotFromMe && sName.isNotBlank()) {
-                                    sEmail to sName
-                                } else null
+                                if (isNotFromMe) sEmail to sName else null
                             }
                             continuation.resume(list)
                         } else {
@@ -1258,33 +1257,49 @@ class SpielRepository(private val context: Context) {
     }
 
     // Beobachtet in Echtzeit, ob dieser Nutzer neue Freundschaftsanfragen erhält
+    // Startet den Echtzeit-Firestore-Listener für eingehende Freundschaftsanfragen.
+    // Filtert direkt per receiverEmail in Firestore (effizient, keine Client-seitige Schleife nötig).
+    // WICHTIG: Beim ersten Snapshot-Start sendet Firestore alle bestehenden Docs als ADDED —
+    //          diese werden ignoriert (hasPendingWrites=false + fromCache=false = serverseitig vorhandene Altdaten).
+    //          Nur echte neue Dokumente (hasPendingWrites=true) oder MODIFIED-Events lösen den Dialog aus.
     fun starteBeobachtungEingehendeAnfragen(ownerEmail: String, onRequestReceived: (senderName: String) -> Unit): com.google.firebase.firestore.ListenerRegistration? {
-        if (!networkMonitor.isOnline.value) return null
         val cleanOwnerEmail = ownerEmail.trim().lowercase()
-        val myName = ladeSpielerName()
+        if (cleanOwnerEmail.isBlank()) return null
+        if (!networkMonitor.isOnline.value) return null
+
+        var erstesSnapshot = true  // Beim ersten Feuern des Listeners alle Altdaten ignorieren
 
         return try {
             firestore.collection("friend_requests")
                 .whereEqualTo("status", "PENDING")
+                .whereEqualTo("receiverEmail", cleanOwnerEmail)
                 .addSnapshotListener { snapshots, error ->
                     if (error != null) {
                         error.printStackTrace()
                         return@addSnapshotListener
                     }
-                    if (snapshots != null && !snapshots.isEmpty) {
+
+                    // Beim allerersten Snapshot kommen alle bestehenden Docs als ADDED —
+                    // das führt zu falschen Dialog-Popups. Wir überspringen diesen ersten Durchlauf.
+                    if (erstesSnapshot) {
+                        erstesSnapshot = false
+                        return@addSnapshotListener
+                    }
+
+                    if (snapshots != null) {
                         for (doc in snapshots.documentChanges) {
+                            // Nur neu hinzugefügte (ADDED) oder geänderte (MODIFIED) Dokumente verarbeiten
                             if (doc.type == com.google.firebase.firestore.DocumentChange.Type.ADDED ||
                                 doc.type == com.google.firebase.firestore.DocumentChange.Type.MODIFIED) {
                                 val d = doc.document
-                                val sEmail = (d.getString("senderEmail") ?: "").lowercase()
                                 val sName = d.getString("senderName") ?: ""
-                                val rEmail = (d.getString("receiverEmail") ?: "").lowercase()
-                                val rName = d.getString("receiverName") ?: ""
+                                val sEmail = (d.getString("senderEmail") ?: "").lowercase()
+                                val myName = ladeSpielerName()
 
-                                val isForMe = (rEmail == cleanOwnerEmail || rEmail == myName.lowercase() || rName.equals(myName, ignoreCase = true) || rName.equals(cleanOwnerEmail, ignoreCase = true))
+                                // Sicherstellen: Nicht meine eigene gesendete Anfrage
                                 val isNotFromMe = (sEmail != cleanOwnerEmail && !sName.equals(myName, ignoreCase = true))
 
-                                if (isForMe && isNotFromMe && sName.isNotBlank()) {
+                                if (isNotFromMe && sName.isNotBlank()) {
                                     CoroutineScope(Dispatchers.Main).launch {
                                         onRequestReceived(sName)
                                     }
