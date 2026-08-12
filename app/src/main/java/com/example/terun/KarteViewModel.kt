@@ -565,25 +565,43 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         // Ergebnisliste zusammenbauen
         ergebnisse = if (active != null) {
             val count = active.spotsAnzahl
-            // Alle Teilnehmer: eigener Name zuerst, dann Gegner aus kommasepariertem String
-            val participants = buildList {
-                add(spielerName)
-                if (active.gegner.isNotEmpty()) {
-                    addAll(active.gegner.split(",").map { it.trim() }.filter { it.isNotEmpty() })
+            val mySpots = if (aufgegeben) 0 else (1..count).count { capturedForIndex(it) }
+            val myResult = Ergebnis(spielerName, mySpots, aufgegeben)
+
+            val opponentResults = mutableListOf<Ergebnis>()
+
+            // 1. Aus gegnerStati (Echtzeit-Verbindung) übernehmen
+            gegnerStati.forEach { (name, statePair) ->
+                if (!name.equals(spielerName, ignoreCase = true)) {
+                    val isOpGaveUp = (name == opponentGaveUpName)
+                    val opSpots = if (isOpGaveUp) 0 else statePair.second
+                    opponentResults.add(Ergebnis(name, opSpots, isOpGaveUp))
                 }
             }
-            // Eigene Spots zählen (0 wenn aufgegeben)
-            val playerSpots = if (aufgegeben) 0 else (1..count).count { capturedForIndex(it) }
-            val resultsList = buildList {
-                add(Ergebnis(spielerName, playerSpots, aufgegeben))
-                // Live-Scores der Gegner aus dem Firebase-Listener übernehmen
-                participants.drop(1).forEach { opponentName ->
-                    val opponentSpots = gegnerStati[opponentName]?.second ?: 0
-                    add(Ergebnis(opponentName, opponentSpots, false))
+
+            // 2. Falls gegnerStati unvollständig ist, aus active.gegner auffüllen
+            val rawOpponentList = buildList {
+                if (active.gegner.isNotBlank()) {
+                    addAll(active.gegner.split(",").map { it.trim() })
+                }
+            }.filter { it.isNotBlank() && !it.equals(spielerName, ignoreCase = true) }.distinct()
+
+            for (opName in rawOpponentList) {
+                if (opponentResults.none { it.name.equals(opName, ignoreCase = true) }) {
+                    val isOpGaveUp = (opName == opponentGaveUpName)
+                    opponentResults.add(Ergebnis(opName, 0, isOpGaveUp))
                 }
             }
-            // Aufgegebene Spieler ans Ende sortieren; dann nach Spot-Anzahl absteigend
-            resultsList.sortedWith(compareBy<Ergebnis> { it.aufgegeben }.thenByDescending { it.spots })
+
+            val resultsList = mutableListOf<Ergebnis>()
+            resultsList.add(myResult)
+            resultsList.addAll(opponentResults)
+
+            // Sortierung: Aufgegebene Spieler (aufgegeben = true) IMMER ganz unten auf den letzten Platz
+            resultsList.sortedWith(
+                compareBy<Ergebnis> { it.aufgegeben }
+                    .thenByDescending { it.spots }
+            )
         } else {
             listOf(Ergebnis(spielerName, 0, aufgegeben))
         }

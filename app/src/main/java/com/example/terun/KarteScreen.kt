@@ -450,7 +450,7 @@ fun KarteScreen(
                                     dismissButton = {
                                         Button(
                                             onClick = {
-                                                viewModel.duellBeenden(success = false, aufgegeben = true)
+                                                viewModel.duellBeenden(success = false, aufgegeben = false)
                                             },
                                             colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f))
                                         ) {
