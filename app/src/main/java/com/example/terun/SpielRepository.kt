@@ -1193,14 +1193,23 @@ class SpielRepository(private val context: Context) {
         }
     }
 
-    // Schreibt Live-Koordinaten, Score und Aufgabe-Status in die Multiplayer-Session
-    fun updateLiveSession(duelId: String, playerEmail: String, lat: Double, lng: Double, spotsCaptured: Int, giveUp: Boolean = false) {
+    // Schreibt Live-Koordinaten, Score, Aufgebe- und Fertig-Status in die Multiplayer-Session
+    fun updateLiveSession(
+        duelId: String,
+        playerEmail: String,
+        lat: Double,
+        lng: Double,
+        spotsCaptured: Int,
+        giveUp: Boolean = false,
+        completed: Boolean = false
+    ) {
         if (!networkMonitor.isOnline.value) return
         val playerSession = mapOf(
             "lat" to lat,
             "lng" to lng,
             "spotsCaptured" to spotsCaptured,
             "giveUp" to giveUp,
+            "completed" to completed,
             "timestamp" to System.currentTimeMillis()
         )
         try {

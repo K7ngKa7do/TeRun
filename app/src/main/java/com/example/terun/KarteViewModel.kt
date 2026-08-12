@@ -637,7 +637,7 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         showGiveUpDialog = false
     }
 
-    // Beobachtet das gegnerische Tracking in Echtzeit
+    // Beobachtet das gegnerische Tracking in Echtzeit & prüft automatische Spielende-Regeln
     fun startLiveSessionBeobachtung(duelId: String) {
         liveSessionListener?.remove()
         gegnerStati.clear()
@@ -646,24 +646,57 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
             .addSnapshotListener { snapshot, error ->
                 if (snapshot != null && snapshot.exists()) {
                     val data = snapshot.data ?: return@addSnapshotListener
+                    val active = aktivesDuell ?: return@addSnapshotListener
+                    val totalSpots = active.spotsAnzahl
+
+                    // Gesamtzahl aller Duell-Teilnehmer (Ersteller + Gegner)
+                    val totalPlayers = buildList {
+                        add(spielerName)
+                        if (active.gegner.isNotBlank()) {
+                            addAll(active.gegner.split(",").map { it.trim() }.filter { it.isNotBlank() })
+                        }
+                    }.distinct().size.coerceAtLeast(2)
+
+                    var finishedCount = 0
+
                     for ((name, valueMap) in data) {
-                        if (name == spielerName) continue // Eigenen State überspringen
                         val m = valueMap as? Map<String, Any> ?: continue
                         val lat = (m["lat"] as? Number)?.toDouble() ?: 0.0
                         val lng = (m["lng"] as? Number)?.toDouble() ?: 0.0
                         val spots = (m["spotsCaptured"] as? Number)?.toInt() ?: 0
                         val giveUp = (m["giveUp"] as? Boolean) ?: false
+                        val completed = (m["completed"] as? Boolean) ?: (spots >= totalSpots)
 
-                        if (giveUp && opponentGaveUpName != name) {
-                            opponentGaveUpName = name
-                            showGiveUpDialog = true
+                        if (name != spielerName) {
+                            if (giveUp && opponentGaveUpName != name) {
+                                opponentGaveUpName = name
+                                showGiveUpDialog = true
+                            }
+
+                            val alterState = gegnerStati[name]
+                            if (alterState != null && spots > alterState.second) {
+                                toastMessage = "Spieler $name hat einen Spot erobert!"
+                            }
+                            gegnerStati[name] = LatLng(lat, lng) to spots
                         }
 
-                        val alterState = gegnerStati[name]
-                        if (alterState != null && spots > alterState.second) {
-                            toastMessage = "Spieler $name hat einen Spot erobert!"
+                        if (giveUp || completed || spots >= totalSpots) {
+                            finishedCount++
                         }
-                        gegnerStati[name] = LatLng(lat, lng) to spots
+                    }
+
+                    // Eigener Status: Wenn ich selbst fertig bin -> Sieg!
+                    val mySpots = (1..totalSpots).count { capturedForIndex(it) }
+                    if (mySpots >= totalSpots && status == SpielStatus.LAEUFT) {
+                        duellBeenden(success = true)
+                    } else {
+                        // Spielende-Regeln:
+                        // Bei 2 Spielern (1v1): Sobald 1 Spieler alle Spots hat (finishedCount >= 1), ist das Spiel für alle vorbei!
+                        // Bei 3+ Spielern: Sobald der vorletzte Spieler fertig ist (finishedCount >= totalPlayers - 1), ist das Spiel vorbei!
+                        val requiredFinished = if (totalPlayers <= 2) 1 else (totalPlayers - 1)
+                        if (finishedCount >= requiredFinished && status == SpielStatus.LAEUFT) {
+                            duellBeenden(success = false)
+                        }
                     }
                 }
             }
@@ -714,17 +747,25 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
         val pos = spielerPosition
         if (active != null && pos != null) {
             val score = (1..active.spotsAnzahl).count { capturedForIndex(it) }
+            val allCaptured = score >= active.spotsAnzahl
             repository.updateLiveSession(
                 active.id,
                 spielerName,
                 pos.latitude,
                 pos.longitude,
-                score
+                score,
+                giveUp = false,
+                completed = allCaptured
             )
+
+            // Wenn alle Spots erreicht sind -> Sofortiger Sieg!
+            if (allCaptured && status == SpielStatus.LAEUFT) {
+                duellBeenden(success = true)
+            }
         }
     }
 
-    // Prüft bei jeder GPS-Aktualisierung, ob der Spieler nah genug an einem Spot oder dem Ziel ist
+    // Prüft bei jeder GPS-Aktualisierung, ob der Spieler nah genug an einem Spot ist
     private fun checkSpotsCaptured(lat: Double, lng: Double) {
         val active = aktivesDuell ?: return
         for (i in 1..active.spotsAnzahl) {
@@ -734,10 +775,9 @@ class KarteViewModel(application: Application) : AndroidViewModel(application) {
                 if (calculateDistance(lat, lng, sLat, sLng) <= 20.0) captureSpot(i)
             }
         }
-        // Wenn alle Spots erreicht sind UND der Spieler am Startpunkt zurück ist → Sieg
+        // Sobald alle Spots erobert wurden -> sofortiger Sieg!
         val allCaptured = (1..active.spotsAnzahl).all { capturedForIndex(it) }
-        val (tLat, tLng) = (startPositionGeo?.latitude ?: 0.0) to (startPositionGeo?.longitude ?: 0.0)
-        if (allCaptured && calculateDistance(lat, lng, tLat, tLng) <= 20.0) {
+        if (allCaptured && status == SpielStatus.LAEUFT) {
             duellBeenden(success = true)
         }
     }
