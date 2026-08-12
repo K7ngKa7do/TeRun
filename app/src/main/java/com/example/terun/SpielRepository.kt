@@ -662,13 +662,18 @@ class SpielRepository(private val context: Context) {
                         dao.insertFreund(FreundEntity(cleanOwnerEmail, fEmail, "ACCEPTED"))
                     }
                 }
-                // Gelöschte Freunde (von Firestore entfernt) auch lokal entfernen.
-                // Das stellt sicher, dass wenn Kaido Sami löscht, Sami beim nächsten Laden
-                // Kaido ebenfalls aus seiner lokalen Freundesliste verliert.
+                // Gelöschte oder doppelte Freunde in Room DB bereinigen
                 val localFriends = dao.getFreundeByOwner(cleanOwnerEmail)
+                val seenEmails = mutableSetOf<String>()
                 for (local in localFriends) {
-                    if (local.status == "ACCEPTED" && local.friendEmail !in serverFriendEmails) {
-                        dao.deleteFreund(local)
+                    val cleanFEmail = local.friendEmail.trim().lowercase()
+                    if (local.status == "ACCEPTED") {
+                        if (cleanFEmail !in serverFriendEmails || seenEmails.contains(cleanFEmail)) {
+                            // Doppelten Altdaten-Eintrag oder vom Server gelöschten Freund aus Room DB löschen
+                            dao.deleteFreund(local)
+                        } else {
+                            seenEmails.add(cleanFEmail)
+                        }
                     }
                 }
             } catch (e: Exception) {
