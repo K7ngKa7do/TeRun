@@ -763,24 +763,13 @@ class SpielRepository(private val context: Context) {
             val myName = ladeSpielerName()
             val docId = if (cleanOwnerEmail < friendEmail) "${cleanOwnerEmail}_${friendEmail}" else "${friendEmail}_${cleanOwnerEmail}"
 
-            // 1. Lokale DB auf existierende Verbindung prüfen
+            // 1. Lokale DB & Firestore prüfen: Wenn bereits ACCEPTED -> ALREADY_FRIENDS
             val lokaleFreundschaft = dao.getFreundschaft(cleanOwnerEmail, friendEmail)
-            if (lokaleFreundschaft != null) {
-                when (lokaleFreundschaft.status) {
-                    "ACCEPTED" -> return@withContext "ALREADY_FRIENDS"
-                    "SENT_PENDING" -> {
-                        // Ich habe bereits eine Anfrage gesendet — keine doppelte Anfrage erlaubt
-                        return@withContext "ALREADY_SENT"
-                    }
-                    "RECEIVED_PENDING" -> {
-                        // Der andere hat mich bereits angefragt → automatisch annehmen
-                        antworteAufFreundesanfrage(cleanOwnerEmail, friendActualName, akzeptiert = true)
-                        return@withContext "SUCCESS"
-                    }
-                }
+            if (lokaleFreundschaft?.status == "ACCEPTED") {
+                return@withContext "ALREADY_FRIENDS"
             }
 
-            // 2. Firestore auf existierende Verbindung prüfen (falls online)
+            // 2. Firestore-Prüfung auf den aktuellen Echtzeit-Status
             if (networkMonitor.isOnline.value) {
                 try {
                     val existingDoc = suspendCancellableCoroutine<com.google.firebase.firestore.DocumentSnapshot?> { continuation ->
@@ -793,18 +782,18 @@ class SpielRepository(private val context: Context) {
                                 }
                             }
                     }
+
                     if (existingDoc != null) {
                         val status = existingDoc.getString("status") ?: ""
                         val senderEmail = (existingDoc.getString("senderEmail") ?: "").lowercase()
                         when {
                             status == "ACCEPTED" -> {
-                                // Bereits befreundet — lokal synchronisieren
                                 dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
                                 dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
                                 return@withContext "ALREADY_FRIENDS"
                             }
                             status == "PENDING" && senderEmail == cleanOwnerEmail -> {
-                                // Ich habe bereits eine Anfrage gesendet — keine parallele Anfrage erlaubt
+                                // Aktuell bereits eine laufende gesendete Anfrage
                                 dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
                                 return@withContext "ALREADY_SENT"
                             }
@@ -814,10 +803,16 @@ class SpielRepository(private val context: Context) {
                                 return@withContext "SUCCESS"
                             }
                         }
+                    } else {
+                        // Kein aktives Dokument in Firestore (z.B. der Empfänger hat eine frühere Anfrage abgelehnt).
+                        // Veralteten lokalen SENT_PENDING-Eintrag bereinigen, um neues Senden zu erlauben.
+                        dao.deleteFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
+            } else if (lokaleFreundschaft?.status == "SENT_PENDING") {
+                return@withContext "ALREADY_SENT"
             }
 
             // Lokalen Eintrag als PENDING speichern
