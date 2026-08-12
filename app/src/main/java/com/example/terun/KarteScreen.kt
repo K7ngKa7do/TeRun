@@ -2022,77 +2022,10 @@ fun ProfilTabContent(
                 }
             }
 
-            // --- Gesendete (ausstehende) Freundschaftsanfragen ---
             Spacer(modifier = Modifier.height(16.dp))
             HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
             Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "📤 Gesendete Anfragen (${viewModel.gesendeteFreundesanfragen.size})",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-                TextButton(
-                    onClick = {
-                        viewModel.resetAlleFreundschaftsanfragen()
-                        Toast.makeText(context, "Anfragen zurückgesetzt!", Toast.LENGTH_SHORT).show()
-                    },
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text("↺ Alle zurücksetzen", color = SpotOrange, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            if (viewModel.gesendeteFreundesanfragen.isEmpty()) {
-                Text(
-                    text = "Keine ausstehenden gesendeten Anfragen.",
-                    color = Color.White.copy(alpha = 0.5f),
-                    fontSize = 12.sp
-                )
-            } else {
-                viewModel.gesendeteFreundesanfragen.forEach { receiverName ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = receiverName,
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Wartet auf Antwort...",
-                                color = Color.White.copy(alpha = 0.5f),
-                                fontSize = 11.sp
-                            )
-                        }
-                        TextButton(
-                            onClick = {
-                                viewModel.zieheFreundesanfrageZurueck(receiverName)
-                                Toast.makeText(context, "Anfrage an $receiverName zurückgezogen!", Toast.LENGTH_SHORT).show()
-                            },
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Text("Zurückziehen", color = Color.Red.copy(alpha = 0.85f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
 
-            Spacer(modifier = Modifier.height(16.dp))
-            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
-            Spacer(modifier = Modifier.height(12.dp))
 
             Text(
                 text = "Freundesliste (${viewModel.freunde.size})",

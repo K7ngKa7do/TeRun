@@ -839,27 +839,35 @@ class SpielRepository(private val context: Context) {
         val cleanOwnerEmail = ownerEmail.trim().lowercase()
 
         if (!networkMonitor.isOnline.value) {
-            return@withContext dao.getPendingRequestsByOwner(cleanOwnerEmail).mapNotNull { pending ->
-                dao.getBenutzerByEmail(pending.friendEmail)?.name ?: pending.friendEmail
-            }
+            // Offline: Bereits akzeptierte Anfragen rausfiltern
+            return@withContext dao.getPendingRequestsByOwner(cleanOwnerEmail)
+                .filter { pending ->
+                    val accepted = dao.getFreundschaft(cleanOwnerEmail, pending.friendEmail)
+                    accepted?.status != "ACCEPTED"
+                }
+                .mapNotNull { pending ->
+                    dao.getBenutzerByEmail(pending.friendEmail)?.name ?: pending.friendEmail
+                }
         }
         try {
             val pendingSenders = suspendCancellableCoroutine<List<Pair<String, String>>> { continuation ->
-                // Direkter Firestore-Query auf receiverEmail: keine fehleranfällige Client-seitige Filterung mehr
+                // Query NUR per receiverEmail (einfacher Index, kein Composite Index nötig).
+                // Status-Filter (PENDING) wird client-seitig durchgeführt.
                 firestore.collection("friend_requests")
-                    .whereEqualTo("status", "PENDING")
                     .whereEqualTo("receiverEmail", cleanOwnerEmail)
                     .get()
                     .addOnCompleteListener { task ->
                         if (task.isSuccessful) {
                             val list = task.result.mapNotNull { doc ->
+                                val status = doc.getString("status") ?: ""
                                 val sEmail = (doc.getString("senderEmail") ?: "").lowercase()
                                 val sName = doc.getString("senderName") ?: ""
 
-                                // Nur Anfragen, die nicht von mir selbst stammen
+                                // Nur echte offene Anfragen (status=PENDING), nicht von mir selbst
+                                val isPending = status == "PENDING"
                                 val isNotFromMe = sEmail != cleanOwnerEmail && sName.isNotBlank()
 
-                                if (isNotFromMe) sEmail to sName else null
+                                if (isPending && isNotFromMe) sEmail to sName else null
                             }
                             continuation.resume(list)
                         } else {
@@ -873,7 +881,12 @@ class SpielRepository(private val context: Context) {
                 dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = senderEmail, status = "RECEIVED_PENDING"))
             }
 
-            pendingSenders.map { it.second }.distinct()
+            // Bereits bestehende Freundschaften sauber aus der RECEIVED_PENDING-Liste rausfiltern
+            pendingSenders
+                .filter { (sEmail, _) ->
+                    dao.getFreundschaft(cleanOwnerEmail, sEmail)?.status != "ACCEPTED"
+                }
+                .map { it.second }.distinct()
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
@@ -1028,12 +1041,20 @@ class SpielRepository(private val context: Context) {
         val docId = if (cleanOwnerEmail < senderEmail) "${cleanOwnerEmail}_${senderEmail}" else "${senderEmail}_${cleanOwnerEmail}"
 
         if (akzeptiert) {
+            // Lokal: RECEIVED_PENDING entfernen und als ACCEPTED eintragen (beidseitig)
+            dao.deleteFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = senderEmail, status = "RECEIVED_PENDING"))
             dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = senderEmail, status = "ACCEPTED"))
             dao.insertFreund(FreundEntity(ownerEmail = senderEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
 
             if (networkMonitor.isOnline.value) {
                 try {
-                    firestore.collection("friend_requests").document(docId).update("status", "ACCEPTED")
+                    // Firestore: friend_requests Dokument LÖSCHEN (nicht updaten auf ACCEPTED).
+                    // Das verhindert, dass es bei der nächsten holeAusstehendeFreundesanfragen-Abfrage
+                    // noch als offene Anfrage erscheint (da wir per status=PENDING filtern).
+                    suspendCancellableCoroutine<Unit> { cont ->
+                        firestore.collection("friend_requests").document(docId).delete()
+                            .addOnCompleteListener { cont.resume(Unit) }
+                    }
 
                     val map1 = mapOf("ownerEmail" to cleanOwnerEmail, "friendEmail" to senderEmail)
                     val map2 = mapOf("ownerEmail" to senderEmail, "friendEmail" to cleanOwnerEmail)
@@ -1044,6 +1065,7 @@ class SpielRepository(private val context: Context) {
                 }
             }
         } else {
+            // Ablehnen: RECEIVED_PENDING lokal entfernen und Firestore-Dokument löschen
             dao.deleteFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = senderEmail, status = "RECEIVED_PENDING"))
 
             if (networkMonitor.isOnline.value) {
@@ -1270,8 +1292,9 @@ class SpielRepository(private val context: Context) {
         var erstesSnapshot = true  // Beim ersten Feuern des Listeners alle Altdaten ignorieren
 
         return try {
+            // Query NUR per receiverEmail (kein Composite Index in Firestore nötig).
+            // status-Filter (PENDING) wird client-seitig geprüft.
             firestore.collection("friend_requests")
-                .whereEqualTo("status", "PENDING")
                 .whereEqualTo("receiverEmail", cleanOwnerEmail)
                 .addSnapshotListener { snapshots, error ->
                     if (error != null) {
@@ -1288,18 +1311,19 @@ class SpielRepository(private val context: Context) {
 
                     if (snapshots != null) {
                         for (doc in snapshots.documentChanges) {
-                            // Nur neu hinzugefügte (ADDED) oder geänderte (MODIFIED) Dokumente verarbeiten
-                            if (doc.type == com.google.firebase.firestore.DocumentChange.Type.ADDED ||
-                                doc.type == com.google.firebase.firestore.DocumentChange.Type.MODIFIED) {
+                            // Nur neu hinzugefügte (ADDED) Dokumente verarbeiten
+                            if (doc.type == com.google.firebase.firestore.DocumentChange.Type.ADDED) {
                                 val d = doc.document
+                                val status = d.getString("status") ?: ""
                                 val sName = d.getString("senderName") ?: ""
                                 val sEmail = (d.getString("senderEmail") ?: "").lowercase()
                                 val myName = ladeSpielerName()
 
-                                // Sicherstellen: Nicht meine eigene gesendete Anfrage
+                                // Nur offene Anfragen (PENDING), nicht meine eigenen
+                                val isPending = status == "PENDING"
                                 val isNotFromMe = (sEmail != cleanOwnerEmail && !sName.equals(myName, ignoreCase = true))
 
-                                if (isNotFromMe && sName.isNotBlank()) {
+                                if (isPending && isNotFromMe && sName.isNotBlank()) {
                                     CoroutineScope(Dispatchers.Main).launch {
                                         onRequestReceived(sName)
                                     }
