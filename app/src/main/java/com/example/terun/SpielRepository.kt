@@ -1266,41 +1266,45 @@ class SpielRepository(private val context: Context) {
         }
     }
 
-    // Beobachtet in Echtzeit, ob gesendete Freundschaftsanfragen akzeptiert wurden
+    // Beobachtet in Echtzeit, ob ein anderer Nutzer meine Freundschaftsanfrage angenommen hat.
+    // Lauscht auf die 'friends'-Collection (wo angenommene Freundschaften hinterlegt werden).
+    // Verhindert unendliche Rekursionsschleifen (kein delete() im Listener!).
     fun starteBeobachtungAngenommeneAnfragen(ownerEmail: String, onAccepted: (friendName: String) -> Unit): com.google.firebase.firestore.ListenerRegistration? {
-        if (!networkMonitor.isOnline.value) return null
+        val cleanOwnerEmail = ownerEmail.trim().lowercase()
+        if (cleanOwnerEmail.isBlank() || !networkMonitor.isOnline.value) return null
+
+        var erstesSnapshot = true // Altdaten beim Start ignorieren
+
         return try {
-            firestore.collection("friend_requests")
-                .whereEqualTo("senderEmail", ownerEmail)
-                .whereEqualTo("status", "ACCEPTED")
+            firestore.collection("friends")
+                .whereEqualTo("ownerEmail", cleanOwnerEmail)
                 .addSnapshotListener { snapshots, error ->
                     if (error != null) {
                         error.printStackTrace()
                         return@addSnapshotListener
                     }
-                    if (snapshots != null && !snapshots.isEmpty) {
+
+                    if (erstesSnapshot) {
+                        erstesSnapshot = false
+                        return@addSnapshotListener
+                    }
+
+                    if (snapshots != null) {
                         for (doc in snapshots.documentChanges) {
-                            if (doc.type == com.google.firebase.firestore.DocumentChange.Type.ADDED ||
-                                doc.type == com.google.firebase.firestore.DocumentChange.Type.MODIFIED) {
-                                val receiverEmail = doc.document.getString("receiverEmail") ?: ""
+                            if (doc.type == com.google.firebase.firestore.DocumentChange.Type.ADDED) {
+                                val friendEmail = (doc.document.getString("friendEmail") ?: "").lowercase()
+                                if (friendEmail.isBlank()) continue
+
                                 CoroutineScope(Dispatchers.IO).launch {
-                                    val friendUser = holeBenutzer(receiverEmail)
-                                    val friendName = friendUser?.name ?: receiverEmail
-                                    
-                                    // Lokal auf ACCEPTED aktualisieren
-                                    dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = receiverEmail, status = "ACCEPTED"))
-                                    dao.insertFreund(FreundEntity(ownerEmail = receiverEmail, friendEmail = ownerEmail, status = "ACCEPTED"))
-                                    
-                                    // Callback aufrufen für Toast
+                                    val friendUser = holeBenutzer(friendEmail)
+                                    val friendName = friendUser?.name ?: friendEmail.substringBefore("@")
+
+                                    // Lokal beidseitig als ACCEPTED in Room speichern
+                                    dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
+                                    dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
+
                                     withContext(Dispatchers.Main) {
                                         onAccepted(friendName)
-                                    }
-                                    
-                                    // Dokument aus friend_requests löschen, da verarbeitet
-                                    try {
-                                        firestore.collection("friend_requests").document(doc.document.id).delete()
-                                    } catch (e: Exception) {
-                                        e.printStackTrace()
                                     }
                                 }
                             }
