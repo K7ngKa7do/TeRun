@@ -1,0 +1,15 @@
+rules_version = '2';
+
+// TeRun – Firestore Security Rules
+// Da TeRun keine Firebase Authentication nutzt (eigenes Login-System via Room DB),
+// werden alle Lese- und Schreiboperationen ohne Zeitlimit erlaubt.
+// Wichtig: Diese Regeln sind für den Unibetrieb / Testbetrieb geeignet.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Alle Dokumente in allen Collections können von jedem gelesen und geschrieben werden.
+    // Kein Datum-Limit, kein Auth-Check (da eigenes Login-System).
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

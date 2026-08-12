@@ -1970,24 +1970,11 @@ fun ProfilTabContent(
                 }
             }
 
-            // --- Eingehende Freundschaftsanfragen ---
-            Spacer(modifier = Modifier.height(16.dp))
-            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = "📩 Eingehende Freundschaftsanfragen (${viewModel.ausstehendeFreundesanfragen.size})",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            if (viewModel.ausstehendeFreundesanfragen.isEmpty()) {
-                Text(
-                    text = "Keine eingehenden Anfragen.",
-                    color = Color.White.copy(alpha = 0.5f),
-                    fontSize = 12.sp
-                )
-            } else {
+            // --- Eingehende Freundschaftsanfragen (direkt, ohne extra Überschrift) ---
+            if (viewModel.ausstehendeFreundesanfragen.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+                Spacer(modifier = Modifier.height(12.dp))
                 viewModel.ausstehendeFreundesanfragen.forEach { senderName ->
                     Row(
                         modifier = Modifier
@@ -2008,7 +1995,7 @@ fun ProfilTabContent(
                                 contentPadding = PaddingValues(horizontal = 8.dp),
                                 modifier = Modifier.height(32.dp)
                             ) {
-                                Text("Zustimmen", color = Color.Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Annehmen", color = Color.Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                             TextButton(
                                 onClick = { viewModel.antworteAufFreundesanfrage(senderName, akzeptiert = false) },

@@ -655,9 +655,19 @@ class SpielRepository(private val context: Context) {
                             }
                         }
                 }
+                // Neu hinzugekommene Freunde lokal speichern
                 for (fEmail in serverFriendEmails) {
                     if (fEmail.isNotBlank()) {
                         dao.insertFreund(FreundEntity(cleanOwnerEmail, fEmail, "ACCEPTED"))
+                    }
+                }
+                // Gelöschte Freunde (von Firestore entfernt) auch lokal entfernen.
+                // Das stellt sicher, dass wenn Kaido Sami löscht, Sami beim nächsten Laden
+                // Kaido ebenfalls aus seiner lokalen Freundesliste verliert.
+                val localFriends = dao.getFreundeByOwner(cleanOwnerEmail)
+                for (local in localFriends) {
+                    if (local.status == "ACCEPTED" && local.friendEmail !in serverFriendEmails) {
+                        dao.deleteFreund(local)
                     }
                 }
             } catch (e: Exception) {
@@ -758,7 +768,12 @@ class SpielRepository(private val context: Context) {
             if (lokaleFreundschaft != null) {
                 when (lokaleFreundschaft.status) {
                     "ACCEPTED" -> return@withContext "ALREADY_FRIENDS"
+                    "SENT_PENDING" -> {
+                        // Ich habe bereits eine Anfrage gesendet — keine doppelte Anfrage erlaubt
+                        return@withContext "ALREADY_SENT"
+                    }
                     "RECEIVED_PENDING" -> {
+                        // Der andere hat mich bereits angefragt → automatisch annehmen
                         antworteAufFreundesanfrage(cleanOwnerEmail, friendActualName, akzeptiert = true)
                         return@withContext "SUCCESS"
                     }
@@ -781,14 +796,23 @@ class SpielRepository(private val context: Context) {
                     if (existingDoc != null) {
                         val status = existingDoc.getString("status") ?: ""
                         val senderEmail = (existingDoc.getString("senderEmail") ?: "").lowercase()
-                        if (status == "ACCEPTED") {
-                            dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
-                            dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
-                            return@withContext "ALREADY_FRIENDS"
-                        } else if (status == "PENDING" && senderEmail != cleanOwnerEmail) {
-                            // Der andere Nutzer hat mich bereits angefragt -> Automatisch annehmen!
-                            antworteAufFreundesanfrage(cleanOwnerEmail, friendActualName, akzeptiert = true)
-                            return@withContext "SUCCESS"
+                        when {
+                            status == "ACCEPTED" -> {
+                                // Bereits befreundet — lokal synchronisieren
+                                dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
+                                dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
+                                return@withContext "ALREADY_FRIENDS"
+                            }
+                            status == "PENDING" && senderEmail == cleanOwnerEmail -> {
+                                // Ich habe bereits eine Anfrage gesendet — keine parallele Anfrage erlaubt
+                                dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
+                                return@withContext "ALREADY_SENT"
+                            }
+                            status == "PENDING" && senderEmail != cleanOwnerEmail -> {
+                                // Der andere Nutzer hat mich bereits angefragt → automatisch annehmen
+                                antworteAufFreundesanfrage(cleanOwnerEmail, friendActualName, akzeptiert = true)
+                                return@withContext "SUCCESS"
+                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -1078,17 +1102,28 @@ class SpielRepository(private val context: Context) {
         }
     }
 
-    // Freundschaft beidseitig löschen
+    // Freundschaft beidseitig löschen (lokal + Firestore)
+    // Wenn Kaido Sami löscht, verliert auch Sami Kaido aus seiner Freundesliste beim nächsten Laden.
     suspend fun loescheFreund(ownerEmail: String, friendName: String) = withContext(Dispatchers.IO) {
-        val friendUser = dao.getBenutzerByName(friendName) ?: return@withContext
-        val friendEmail = friendUser.email
-        dao.deleteFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
-        dao.deleteFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = ownerEmail, status = "ACCEPTED"))
+        val cleanOwnerEmail = ownerEmail.trim().lowercase()
+        val friendUser = dao.getBenutzerByName(friendName) ?: run {
+            // Kein lokaler Eintrag — trotzdem versuchen via Firestore aufzulösen
+            return@withContext
+        }
+        val friendEmail = friendUser.email.trim().lowercase()
+
+        // Lokal beidseitig entfernen (alle Status)
+        dao.deleteFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
+        dao.deleteFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
 
         if (networkMonitor.isOnline.value) {
+            val docId = if (cleanOwnerEmail < friendEmail) "${cleanOwnerEmail}_${friendEmail}" else "${friendEmail}_${cleanOwnerEmail}"
             try {
-                firestore.collection("friends").document("${ownerEmail}_$friendEmail").delete()
-                firestore.collection("friends").document("${friendEmail}_$ownerEmail").delete()
+                // friends-Collection (beidseitig) löschen
+                firestore.collection("friends").document("${cleanOwnerEmail}_$friendEmail").delete()
+                firestore.collection("friends").document("${friendEmail}_$cleanOwnerEmail").delete()
+                // friend_requests-Dokument ebenfalls löschen (verhindert Neuanzeige als Anfrage)
+                firestore.collection("friend_requests").document(docId).delete()
             } catch (e: Exception) {
                 e.printStackTrace()
             }
