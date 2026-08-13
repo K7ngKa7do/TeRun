@@ -1,11 +1,3 @@
-// Datei: KarteScreen.kt
-// Paket: com.example.terun
-// Quelle: moco202612creatingcomposables.pdf — Column, Row, Box, Scaffold, Button, Text, LazyColumn, Card
-// Quelle: moco202613composablesmodifier.pdf — Modifier-Verwendung (weight, padding, background, shape, verticalScroll)
-// Quelle: moco202614recompositionstates.pdf — Statusverwaltung mit remember und mutableStateOf
-// Quelle: moco202618mvvm.pdf — MVVM mit ViewModel zur Trennung von UI und Spiellogik
-// Quelle: moco202640permissions.pdf — Berechtigungen und GPS-Ortung über Google Maps
-
 package com.example.terun
 
 import android.Manifest
@@ -65,7 +57,55 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 
-// Haupt-Screen für den "Karte"-Tab.
+/**
+ * =====================================================================
+ * KarteScreen – Hauptscreen der App (Karte, Duelle, Profil)
+ * =====================================================================
+ *
+ * VORLESUNG 12 – Creating Composables:
+ * Der Screen ist aus vielen kleinen Composables zusammengesetzt:
+ * KarteScreen, ProfilTabContent, DuelleTabContent, DuellErstellenScreen,
+ * EndScreen, ErgebnisZeile, KarteTopBar. Jedes ist eine eigene @Composable Funktion.
+ *
+ * VORLESUNG 13 – Modifier:
+ * Modifier steuern Layout (fillMaxSize, padding, weight), Aussehen (background,
+ * clip, border) und Verhalten (clickable, verticalScroll).
+ *
+ * VORLESUNG 14 – State Management (remember + mutableStateOf):
+ * Lokaler UI-State (z.B. welcher Tab aktiv ist, Suchtext, Dialog-Sichtbarkeit)
+ * wird mit remember { mutableStateOf() } verwaltet. Modelldaten kommen
+ * aus dem ViewModel (VL 18 – MVVM).
+ *
+ * VORLESUNG 18 – MVVM:
+ * KarteScreen ist die View-Schicht. Sie liest nur Daten aus dem ViewModel
+ * und ruft ViewModel-Methoden auf (z.B. duellStarten, freundHinzufuegen).
+ * Das ViewModel hält den gesamten Spielzustand.
+ *
+ * VORLESUNG 40 – Permissions:
+ * Vor dem Starten eines Duells wird die GPS-Berechtigung geprüft.
+ * rememberLauncherForActivityResult() startet den Berechtigungsdialog.
+ *
+ * VORLESUNG 43 – Location:
+ * Die Google Maps Compose-Bibliothek zeigt die Karte mit Spieler- und Spot-Markern.
+ * Die GPS-Position kommt vom LocationHelper (FusedLocationProviderClient).
+ *
+ * Aufbau dieses Screens:
+ * ┌──────────────────┐
+ * │   KarteTopBar    │  ← Obere Leiste mit Logo und Spielinfo
+ * ├──────────────────┤
+ * │                  │
+ * │  Google Maps     │  ← Tab "Karte" (Spots, Spieler, Route)
+ * │  oder            │
+ * │  DuelleTab       │  ← Tab "Duelle" (Liste + Erstellen)
+ * │  oder            │
+ * │  ProfilTab       │  ← Tab "Profil" (Name, Statistik, Freunde)
+ * │                  │
+ * ├──────────────────┤
+ * │ BottomNavigation │  ← Untere Tab-Leiste
+ * └──────────────────┘
+ */
+
+// Haupt-Composable: Verwaltet die Tab-Navigation und GPS-Berechtigung
 @Composable
 fun KarteScreen(
     viewModel: KarteViewModel = viewModel(),
@@ -727,6 +767,7 @@ fun KarteScreen(
 }
 
 // End-Screen
+// ======================= Ergebnis-Screen nach Duellende =======================
 @Composable
 fun EndScreen(
     ergebnisse: List<Ergebnis>,
@@ -838,6 +879,7 @@ fun EndScreen(
     }
 }
 
+// Einzelne Zeile in der Ergebnis-Tabelle (Platz, Name, Spots, Aufgegeben-Status)
 @Composable
 fun ErgebnisZeile(
     platz: Int,
@@ -880,6 +922,9 @@ fun ErgebnisZeile(
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+// ======================= Duell-Erstellungsscreen =======================
+// Hier kann der Spieler ein neues Duell konfigurieren:
+// Name, Anzahl Spots, Zeitlimit, Spot-Positionen (Adresseingabe oder Karten-Tap)
 @Composable
 fun DuellErstellenScreen(
     onDismiss: () -> Unit,
@@ -1557,6 +1602,8 @@ suspend fun searchPlacesNominatim(query: String): List<Pair<Pair<String, String>
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+// ======================= Duelle-Tab =======================
+// Zeigt alle gespeicherten Duelle und bietet "Neues Duell erstellen"
 @Composable
 fun DuelleTabContent(
     viewModel: KarteViewModel,
@@ -1759,6 +1806,8 @@ fun DuelleTabContent(
 
 
 @OptIn(ExperimentalMaterial3Api::class)
+// ======================= Profil-Tab =======================
+// Zeigt Spielerprofil, Statistiken, Freundesliste und Freundschaftsanfragen
 @Composable
 fun ProfilTabContent(
     viewModel: KarteViewModel,
@@ -2112,6 +2161,8 @@ private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Do
 }
 
 // Obere Statusleiste (auch wiederverwendet in Meilenstein-Kompatibilität)
+// ======================= Obere Leiste (TopBar) =======================
+// Zeigt das TeRun-Logo und im Duell die verbleibende Zeit + Spot-Fortschritt
 @Composable
 fun KarteTopBar(duellLaeuft: Boolean, viewModel: KarteViewModel = viewModel()) {
     Row(

@@ -1,10 +1,3 @@
-// Datei: LoginScreen.kt
-// Paket: com.example.terun
-// Quelle: moco202611declarativeui.pdf — Deklaratives UI-Paradigma, @Composable Annotation
-// Quelle: moco202612creatingcomposables.pdf — Column, Button, Text, @Preview
-// Quelle: moco202613composablesmodifier.pdf — Modifier, fillMaxSize, background, padding, clip, size
-// Quelle: moco202617pixeldensities.pdf — Verwendung von dp und sp statt px
-
 package com.example.terun
 
 import androidx.compose.foundation.background
@@ -24,7 +17,28 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// Startscreen der TeRun-App (Splash-Screen)
+/**
+ * =====================================================================
+ * LoginScreen – Willkommensscreen der TeRun-App
+ * =====================================================================
+ *
+ * VORLESUNG 11 – Declarative UI:
+ * Die gesamte Oberfläche wird deklarativ beschrieben: Box, Column, Text, Button.
+ * Kein manuelles Setzen von Werten (setText) – stattdessen beschreibt die Funktion
+ * wie die UI aussehen soll, und Compose rendert sie automatisch.
+ *
+ * VORLESUNG 12 – Creating Composables:
+ * LoginScreen ist ein zusammengesetztes Composable aus TeRunLogo, Text und Button.
+ * @Preview erlaubt eine Vorschau im Android Studio ohne die App zu starten.
+ *
+ * VORLESUNG 14 – State Hoisting:
+ * Die Button-Callbacks (onSignInClicked, onRegisterClicked) werden als Parameter
+ * von außen übergeben. LoginScreen hat keinen eigenen Zustand → stateless.
+ *
+ * VORLESUNG 16 – Navigation:
+ * Die Callbacks navigieren im NavHost zu SignInRoute bzw. RegisterRoute.
+ * LoginScreen selbst kennt den NavController NICHT (State Hoisting Prinzip).
+ */
 @Composable
 fun LoginScreen(
     onSignInClicked: () -> Unit,

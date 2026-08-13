@@ -1,6 +1,3 @@
-// Datei: SignInScreen.kt
-// Paket: com.example.terun
-
 package com.example.terun
 
 import androidx.compose.foundation.background
@@ -30,11 +27,30 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
+/**
+ * =====================================================================
+ * SignInScreen – Anmeldescreen (E-Mail + Passwort)
+ * =====================================================================
+ *
+ * VORLESUNG 14 – State Management (remember + mutableStateOf):
+ * Die Eingabefelder (email, password) werden mit 'remember { mutableStateOf() }'
+ * gespeichert. Bei jeder Texteingabe wird nur das Feld neu gerendert (Recomposition),
+ * nicht der ganze Screen. Fehlermeldungen werden ebenfalls als State gehalten.
+ *
+ * VORLESUNG 28 – Coroutines:
+ * Der Anmeldevorgang (repository.anmelden) läuft in einer Coroutine,
+ * damit der Main-Thread nicht blockiert wird (asynchrone Netzwerkanfrage).
+ * rememberCoroutineScope() liefert einen Scope der an den Composable-Lifecycle gebunden ist.
+ *
+ * VORLESUNG 14 – State Hoisting:
+ * onSignInClicked und onRegisterClicked werden als Callback-Lambdas übergeben.
+ * Der NavController wird NICHT direkt weitergegeben (Best Practice aus VL 16).
+ */
 @Composable
 fun SignInScreen(
     repository: SpielRepository,
-    onSignInClicked: () -> Unit,      // Wird aufgerufen wenn Anmelden erfolgreich
-    onRegisterClicked: () -> Unit     // Wird aufgerufen wenn "Jetzt registrieren" geklickt
+    onSignInClicked: () -> Unit,      // Callback: erfolgreiche Anmeldung → NavHost navigiert zu HomeRoute
+    onRegisterClicked: () -> Unit     // Callback: "Noch kein Konto?" → NavHost navigiert zu RegisterRoute
 ) {
     val coroutineScope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current

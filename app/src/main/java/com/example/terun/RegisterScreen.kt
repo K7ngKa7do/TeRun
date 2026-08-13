@@ -1,6 +1,3 @@
-// Datei: RegisterScreen.kt
-// Paket: com.example.terun
-
 package com.example.terun
 
 import android.widget.Toast
@@ -33,11 +30,34 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Email
 import kotlinx.coroutines.launch
 
+/**
+ * =====================================================================
+ * RegisterScreen – Registrierungsscreen (neues Konto erstellen)
+ * =====================================================================
+ *
+ * VORLESUNG 14 – State Management (remember + mutableStateOf):
+ * Alle Eingabefelder (Spielername, E-Mail, Passwort, Passwort wiederholen)
+ * werden mit remember { mutableStateOf("") } verwaltet. Jede Änderung
+ * löst eine Recomposition nur für das betroffene Composable aus.
+ *
+ * VORLESUNG 28 – Coroutines:
+ * Die Registrierung (repository.registrieren) ist eine asynchrone Operation
+ * (Firestore + Room-Datenbank). Sie wird in einer Coroutine ausgeführt,
+ * um den Main-Thread nicht zu blockieren.
+ *
+ * VORLESUNG 40 – Permissions:
+ * Nach der Registrierung wird die GPS-Berechtigung (ACCESS_FINE_LOCATION)
+ * angefragt, da die App die Position des Spielers für Duelle benötigt.
+ *
+ * VORLESUNG 14 – State Hoisting:
+ * onRegisterClicked und onSignInClicked werden als Lambdas übergeben.
+ * Der Screen kennt den NavController nicht direkt.
+ */
 @Composable
 fun RegisterScreen(
     repository: SpielRepository,
-    onRegisterClicked: () -> Unit,
-    onSignInClicked: () -> Unit
+    onRegisterClicked: () -> Unit,    // Callback: erfolgreiche Registrierung → NavHost navigiert zu HomeRoute
+    onSignInClicked: () -> Unit       // Callback: "Schon ein Konto?" → NavHost navigiert zu SignInRoute
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current

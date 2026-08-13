@@ -19,8 +19,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * TeRunLogo – Wiederverwendbare Composable Funktion für das TeRun-Markenlogo.
- * Rendert das blaue Abzeichen mit dem prägnanten weißen 'T'-Symbol.
+ * =====================================================================
+ * TeRunLogo – Wiederverwendbares Composable für das App-Logo
+ * =====================================================================
+ *
+ * VORLESUNG 12 – Creating Composables:
+ * Ein Composable sollte klein, wiederverwendbar und mit Parametern steuerbar sein.
+ * TeRunLogo hat einen Parameter 'size', mit dem die Größe angepasst werden kann.
+ * So kann dasselbe Logo auf verschiedenen Screens in unterschiedlichen Größen verwendet werden.
+ *
+ * VORLESUNG 13 – Modifier:
+ * Modifier werden verkettet (chained) und bestimmen Größe, Form und Hintergrund.
+ * .size() → Abmessungen | .clip() → abgerundete Ecken | .background() → Farbe
  */
 @Composable
 fun TeRunLogo(size: Dp = 88.dp) {

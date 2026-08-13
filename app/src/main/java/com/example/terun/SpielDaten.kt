@@ -1,5 +1,20 @@
 package com.example.terun
 
+/**
+ * =====================================================================
+ * SpielDaten – Domain-Objekte der Model-Schicht (MVVM)
+ * =====================================================================
+ *
+ * VORLESUNG 18 – MVVM (Model-View-ViewModel):
+ * Diese Datei enthält die Datenklassen der Model-Schicht:
+ * - SpielStatus → steuert, welche UI angezeigt wird (Idle / Läuft / Beendet)
+ * - Duell       → beschreibt ein Lauf-Duell mit Spots und Zeitlimit
+ * - Ergebnis    → enthält das Resultat eines Spielers nach einem Duell
+ *
+ * Diese Objekte werden vom ViewModel (KarteViewModel) verwaltet
+ * und von der View (KarteScreen) beobachtet und angezeigt.
+ */
+
 // Spielzustand der App — wird im ViewModel gehalten und steuert die UI-Anzeige
 enum class SpielStatus {
     IDLE,     // Kein Duell aktiv; Karte wird normal angezeigt

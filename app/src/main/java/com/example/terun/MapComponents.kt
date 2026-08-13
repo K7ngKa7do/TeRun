@@ -1,6 +1,3 @@
-// Datei: MapComponents.kt
-// Paket: com.example.terun
-
 package com.example.terun
 
 import androidx.compose.foundation.BorderStroke
@@ -26,6 +23,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+/**
+ * =====================================================================
+ * MapComponents – Wiederverwendbare UI-Bausteine (Composables)
+ * =====================================================================
+ *
+ * VORLESUNG 12 – Creating Composables:
+ * Composables sollten klein, fokussiert und wiederverwendbar sein.
+ * TeRunButton und GlassmorphicCard werden auf mehreren Screens eingesetzt.
+ *
+ * VORLESUNG 13 – Modifier:
+ * Modifier steuern Größe, Form, Hintergrund und Abstände.
+ * Brush.horizontalGradient() erzeugt einen Farbverlauf als Hintergrund.
+ *
+ * VORLESUNG 14 – State Hoisting:
+ * onClick wird als Lambda-Parameter übergeben (statt intern zu speichern).
+ * Der aufrufende Screen entscheidet, was beim Klick passiert → Composable bleibt zustandslos.
+ */
 
 // Wiederverwendbarer Button mit horizontalem Farbverlauf im Sci-Fi-Look
 @Composable
@@ -70,7 +85,7 @@ fun TeRunButton(
     }
 }
 
-// Transparenter Glasmorphismus-Container passend zu den Login-Eingabefeldern
+// Transparenter Glasmorphismus-Container – wird auf Login, Register und Profilseiten verwendet
 @Composable
 fun GlassmorphicCard(
     modifier: Modifier = Modifier,

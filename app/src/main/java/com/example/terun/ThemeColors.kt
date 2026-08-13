@@ -1,12 +1,19 @@
-// Datei: ThemeColors.kt
-// Paket: com.example.terun
-// Quelle: moco202613composablesmodifier.pdf — Verwendung konsistenter Farbwerte in Compose Color(0xFF...)
-
 package com.example.terun
 
 import androidx.compose.ui.graphics.Color
 
-// Globale Farbkonstanten für ein einheitliches App-Design im Premium-SciFi-Look
+/**
+ * =====================================================================
+ * ThemeColors – Zentrale Farbdefinitionen der App
+ * =====================================================================
+ *
+ * VORLESUNG 13 – Composables & Modifier:
+ * Farben werden als globale Kotlin-Konstanten definiert und überall
+ * in Composables per Modifier.background() oder als Parameter verwendet.
+ * Color(0xFF...) erstellt eine Farbe aus einem Hex-Farbcode (ARGB-Format).
+ *
+ * Alle Farben an einem Ort = einfach änderbar und konsistent im ganzen Projekt.
+ */
 val DarkBackground = Color(0xFF0D1B2A)       // Dunkles Midnight-Blau für Screens
 val TeRunBlue = Color(0xFF1A6FF5)            // Blau für Primär-Buttons und Markierungen
 val TeRunBlueLight = Color(0xFF4A90E2)       // Helles Digital-Blau für Farbverläufe (Gradients)
