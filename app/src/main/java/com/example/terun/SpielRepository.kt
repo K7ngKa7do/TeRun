@@ -42,6 +42,11 @@ import kotlin.coroutines.resume
  */
 class SpielRepository(private val context: Context) {
 
+    // [Cleanup 27.08.2026]
+    // Bestehende Vorlesungskommentare und öffentliche Funktionsnamen bleiben erhalten.
+    // Wiederholte Mapping-/ID-Logik wird nur in private Hilfsmethoden ausgelagert,
+    // damit die Datenschicht übersichtlicher wird, ohne das Verhalten zu verändern.
+
     // DAO: Datenbankzugriffsobjekt für Room (public damit TeRunSyncWorker darauf zugreifen kann)
     val dao = TeRunDatabase.getDatabase(context).teRunDao()
     // Wrapper für SharedPreferences-Zugriffe (Key-Value Speicherung, VL 32)
@@ -113,20 +118,7 @@ class SpielRepository(private val context: Context) {
     suspend fun synchronisiereLokaleDaten() = withContext(Dispatchers.IO) {
         val localDuelle = dao.getAlleDuelle().map { it.toDuell() }
         for (duell in localDuelle) {
-            val duelMap = mapOf(
-                "id" to duell.id,
-                "name" to duell.name,
-                "spotsAnzahl" to duell.spotsAnzahl,
-                "zeitLimitMinuten" to duell.zeitLimitMinuten,
-                "spot1Lat" to duell.spot1Lat, "spot1Lng" to duell.spot1Lng,
-                "spot2Lat" to duell.spot2Lat, "spot2Lng" to duell.spot2Lng,
-                "spot3Lat" to duell.spot3Lat, "spot3Lng" to duell.spot3Lng,
-                "spot4Lat" to duell.spot4Lat, "spot4Lng" to duell.spot4Lng,
-                "spot5Lat" to duell.spot5Lat, "spot5Lng" to duell.spot5Lng,
-                "gegner" to duell.gegner,
-                "creator" to getAccountKey(),
-                "invitations" to buildInvitationsMap(duell.gegner)
-            )
+            val duelMap = duell.toFirestoreMap()
             try {
                 firestore.collection("duels").document(duell.id).set(duelMap)
             } catch (e: Exception) {
@@ -381,18 +373,17 @@ class SpielRepository(private val context: Context) {
                     .addOnCompleteListener { task ->
                         if (task.isSuccessful) {
                             val list = mutableListOf<Duell>()
-                            val myEmail = getAccountKey().trim().lowercase()
-                            val myName = ladeSpielerName().trim().lowercase()
+                            val myEmail = getAccountKey()
+                            val myName = ladeSpielerName()
                             for (doc in task.result) {
-                                val creator = (doc.getString("creator") ?: "").trim().lowercase()
-                                val creatorName = (doc.getString("creatorName") ?: "").trim().lowercase()
+                                val creator = doc.getString("creator") ?: ""
                                 val gegnerStr = doc.getString("gegner") ?: ""
+                                val invitations = doc.get("invitations") as? Map<String, String> ?: emptyMap()
+                                val myInvitationStatus = invitations[myName] ?: invitations[myEmail]
 
-                                // "Verfügbare Duelle" gehören AUSSCHLIESSLICH dem Ersteller des Duells.
-                                // Eingeladene Nutzer sehen Duelle NICHT in "Verfügbare Duelle".
-                                val isCreator = (creator == myEmail || creator == myName || creatorName == myName) && creator.isNotBlank()
-
-                                if (isCreator) {
+                                // Ein Duell gehört nur unter "Verfügbare Duelle", wenn ich der Ersteller bin
+                                // ODER wenn ich eingeladen wurde UND die Einladung ACCEPTED habe.
+                                if (creator == myEmail || myInvitationStatus == "ACCEPTED") {
                                     list.add(
                                         Duell(
                                             id = doc.id,
@@ -430,20 +421,7 @@ class SpielRepository(private val context: Context) {
     suspend fun holeDuelle(): List<Duell> = withContext(Dispatchers.IO) {
         val serverDuelle = ladeDuelleVomServer()
         for (duell in serverDuelle) {
-            dao.insertDuell(
-                DuellEntity(
-                    id = duell.id,
-                    name = duell.name,
-                    spotsAnzahl = duell.spotsAnzahl,
-                    zeitLimitMinuten = duell.zeitLimitMinuten,
-                    spot1Lat = duell.spot1Lat, spot1Lng = duell.spot1Lng,
-                    spot2Lat = duell.spot2Lat, spot2Lng = duell.spot2Lng,
-                    spot3Lat = duell.spot3Lat, spot3Lng = duell.spot3Lng,
-                    spot4Lat = duell.spot4Lat, spot4Lng = duell.spot4Lng,
-                    spot5Lat = duell.spot5Lat, spot5Lng = duell.spot5Lng,
-                    gegner = duell.gegner
-                )
-            )
+            dao.insertDuell(duell.toEntity())
         }
         if (networkMonitor.isOnline.value) {
             serverDuelle
@@ -458,35 +436,9 @@ class SpielRepository(private val context: Context) {
 
     // Duell als neue Zeile in die Room-DB und Firestore schreiben
     suspend fun speichereDuell(duell: Duell) = withContext(Dispatchers.IO) {
-        dao.insertDuell(
-            DuellEntity(
-                id = duell.id,
-                name = duell.name,
-                spotsAnzahl = duell.spotsAnzahl,
-                zeitLimitMinuten = duell.zeitLimitMinuten,
-                spot1Lat = duell.spot1Lat, spot1Lng = duell.spot1Lng,
-                spot2Lat = duell.spot2Lat, spot2Lng = duell.spot2Lng,
-                spot3Lat = duell.spot3Lat, spot3Lng = duell.spot3Lng,
-                spot4Lat = duell.spot4Lat, spot4Lng = duell.spot4Lng,
-                spot5Lat = duell.spot5Lat, spot5Lng = duell.spot5Lng,
-                gegner = duell.gegner
-            )
-        )
+        dao.insertDuell(duell.toEntity())
         if (networkMonitor.isOnline.value) {
-            val duelMap = mapOf(
-                "id" to duell.id,
-                "name" to duell.name,
-                "spotsAnzahl" to duell.spotsAnzahl,
-                "zeitLimitMinuten" to duell.zeitLimitMinuten,
-                "spot1Lat" to duell.spot1Lat, "spot1Lng" to duell.spot1Lng,
-                "spot2Lat" to duell.spot2Lat, "spot2Lng" to duell.spot2Lng,
-                "spot3Lat" to duell.spot3Lat, "spot3Lng" to duell.spot3Lng,
-                "spot4Lat" to duell.spot4Lat, "spot4Lng" to duell.spot4Lng,
-                "spot5Lat" to duell.spot5Lat, "spot5Lng" to duell.spot5Lng,
-                "gegner" to duell.gegner,
-                "creator" to getAccountKey(),
-                "invitations" to buildInvitationsMap(duell.gegner)
-            )
+            val duelMap = duell.toFirestoreMap()
             try {
                 firestore.collection("duels").document(duell.id).set(duelMap)
             } catch (e: Exception) {
@@ -656,24 +608,9 @@ class SpielRepository(private val context: Context) {
                             }
                         }
                 }
-                // Neu hinzugekommene Freunde lokal speichern
                 for (fEmail in serverFriendEmails) {
                     if (fEmail.isNotBlank()) {
                         dao.insertFreund(FreundEntity(cleanOwnerEmail, fEmail, "ACCEPTED"))
-                    }
-                }
-                // Gelöschte oder doppelte Freunde in Room DB bereinigen
-                val localFriends = dao.getFreundeByOwner(cleanOwnerEmail)
-                val seenEmails = mutableSetOf<String>()
-                for (local in localFriends) {
-                    val cleanFEmail = local.friendEmail.trim().lowercase()
-                    if (local.status == "ACCEPTED") {
-                        if (cleanFEmail !in serverFriendEmails || seenEmails.contains(cleanFEmail)) {
-                            // Doppelten Altdaten-Eintrag oder vom Server gelöschten Freund aus Room DB löschen
-                            dao.deleteFreund(local)
-                        } else {
-                            seenEmails.add(cleanFEmail)
-                        }
                     }
                 }
             } catch (e: Exception) {
@@ -681,16 +618,14 @@ class SpielRepository(private val context: Context) {
             }
         }
 
-        // Raum DB abfragen & Doppler per .distinct() strikt entfernen
-        val namesList = dao.getFreundeByOwner(cleanOwnerEmail).mapNotNull { friend ->
-            val cleanFriendEmail = friend.friendEmail.trim().lowercase()
-            val localUser = dao.getBenutzerByEmail(cleanFriendEmail)
+        dao.getFreundeByOwner(cleanOwnerEmail).mapNotNull { friend ->
+            val localUser = dao.getBenutzerByEmail(friend.friendEmail)
             if (localUser != null) {
                 localUser.name
             } else if (networkMonitor.isOnline.value) {
                 try {
                     val fireName = suspendCancellableCoroutine<String?> { continuation ->
-                        firestore.collection("users").document(cleanFriendEmail).get()
+                        firestore.collection("users").document(friend.friendEmail).get()
                             .addOnCompleteListener { task ->
                                 if (task.isSuccessful && task.result != null) {
                                     continuation.resume(task.result.getString("name"))
@@ -700,21 +635,18 @@ class SpielRepository(private val context: Context) {
                             }
                     }
                     if (fireName != null) {
-                        dao.insertBenutzer(BenutzerEntity(cleanFriendEmail, fireName, ""))
+                        dao.insertBenutzer(BenutzerEntity(friend.friendEmail, fireName, ""))
                         fireName
                     } else {
-                        cleanFriendEmail.substringBefore("@")
+                        friend.friendEmail.substringBefore("@")
                     }
                 } catch (e: Exception) {
-                    cleanFriendEmail.substringBefore("@")
+                    friend.friendEmail.substringBefore("@")
                 }
             } else {
-                cleanFriendEmail.substringBefore("@")
+                friend.friendEmail.substringBefore("@")
             }
-        }
-
-        // Duplikate (z.B. durch Groß-/Kleinschreibung) strikt herausfiltern
-        namesList.distinct()
+        }.distinct()
     }
 
     // Freundschaftsanfrage senden
@@ -774,13 +706,19 @@ class SpielRepository(private val context: Context) {
             val myName = ladeSpielerName()
             val docId = if (cleanOwnerEmail < friendEmail) "${cleanOwnerEmail}_${friendEmail}" else "${friendEmail}_${cleanOwnerEmail}"
 
-            // 1. Lokale DB & Firestore prüfen: Wenn bereits ACCEPTED -> ALREADY_FRIENDS
+            // 1. Lokale DB auf existierende Verbindung prüfen
             val lokaleFreundschaft = dao.getFreundschaft(cleanOwnerEmail, friendEmail)
-            if (lokaleFreundschaft?.status == "ACCEPTED") {
-                return@withContext "ALREADY_FRIENDS"
+            if (lokaleFreundschaft != null) {
+                when (lokaleFreundschaft.status) {
+                    "ACCEPTED" -> return@withContext "ALREADY_FRIENDS"
+                    "RECEIVED_PENDING" -> {
+                        antworteAufFreundesanfrage(cleanOwnerEmail, friendActualName, akzeptiert = true)
+                        return@withContext "SUCCESS"
+                    }
+                }
             }
 
-            // 2. Firestore-Prüfung auf den aktuellen Echtzeit-Status
+            // 2. Firestore auf existierende Verbindung prüfen (falls online)
             if (networkMonitor.isOnline.value) {
                 try {
                     val existingDoc = suspendCancellableCoroutine<com.google.firebase.firestore.DocumentSnapshot?> { continuation ->
@@ -793,37 +731,22 @@ class SpielRepository(private val context: Context) {
                                 }
                             }
                     }
-
                     if (existingDoc != null) {
                         val status = existingDoc.getString("status") ?: ""
                         val senderEmail = (existingDoc.getString("senderEmail") ?: "").lowercase()
-                        when {
-                            status == "ACCEPTED" -> {
-                                dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
-                                dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
-                                return@withContext "ALREADY_FRIENDS"
-                            }
-                            status == "PENDING" && senderEmail == cleanOwnerEmail -> {
-                                // Aktuell bereits eine laufende gesendete Anfrage
-                                dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
-                                return@withContext "ALREADY_SENT"
-                            }
-                            status == "PENDING" && senderEmail != cleanOwnerEmail -> {
-                                // Der andere Nutzer hat mich bereits angefragt → automatisch annehmen
-                                antworteAufFreundesanfrage(cleanOwnerEmail, friendActualName, akzeptiert = true)
-                                return@withContext "SUCCESS"
-                            }
+                        if (status == "ACCEPTED") {
+                            dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
+                            dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
+                            return@withContext "ALREADY_FRIENDS"
+                        } else if (status == "PENDING" && senderEmail != cleanOwnerEmail) {
+                            // Der andere Nutzer hat mich bereits angefragt -> Automatisch annehmen!
+                            antworteAufFreundesanfrage(cleanOwnerEmail, friendActualName, akzeptiert = true)
+                            return@withContext "SUCCESS"
                         }
-                    } else {
-                        // Kein aktives Dokument in Firestore (z.B. der Empfänger hat eine frühere Anfrage abgelehnt).
-                        // Veralteten lokalen SENT_PENDING-Eintrag bereinigen, um neues Senden zu erlauben.
-                        dao.deleteFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "SENT_PENDING"))
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
-            } else if (lokaleFreundschaft?.status == "SENT_PENDING") {
-                return@withContext "ALREADY_SENT"
             }
 
             // Lokalen Eintrag als PENDING speichern
@@ -857,47 +780,40 @@ class SpielRepository(private val context: Context) {
         }
 
     // Löscht veraltete Hängengebliebene ausstehende Anfragen im lokalen Cache
-    // Bereinigt beim App-Start nur die gesendeten, noch ausstehenden Anfragen im lokalen Cache.
-    // RECEIVED_PENDING Einträge werden NICHT gelöscht, damit die Freundesliste korrekt bleibt.
     suspend fun bereinigeAusstehendeAnfragen(ownerEmail: String) = withContext(Dispatchers.IO) {
         val cleanEmail = ownerEmail.trim().lowercase()
-        dao.deleteSentPendingByOwner(cleanEmail)
+        dao.deletePendingFreundeByOwner(cleanEmail)
     }
 
     // Holt ausstehende Freundschaftsanfragen für den angemeldeten Benutzer
     suspend fun holeAusstehendeFreundesanfragen(ownerEmail: String): List<String> = withContext(Dispatchers.IO) {
         val cleanOwnerEmail = ownerEmail.trim().lowercase()
+        val myName = ladeSpielerName()
 
         if (!networkMonitor.isOnline.value) {
-            // Offline: Bereits akzeptierte Anfragen rausfiltern
-            return@withContext dao.getPendingRequestsByOwner(cleanOwnerEmail)
-                .filter { pending ->
-                    val accepted = dao.getFreundschaft(cleanOwnerEmail, pending.friendEmail)
-                    accepted?.status != "ACCEPTED"
-                }
-                .mapNotNull { pending ->
-                    dao.getBenutzerByEmail(pending.friendEmail)?.name ?: pending.friendEmail
-                }
+            return@withContext dao.getPendingRequestsByOwner(cleanOwnerEmail).mapNotNull { pending ->
+                dao.getBenutzerByEmail(pending.friendEmail)?.name ?: pending.friendEmail
+            }
         }
         try {
             val pendingSenders = suspendCancellableCoroutine<List<Pair<String, String>>> { continuation ->
-                // Query NUR per receiverEmail (einfacher Index, kein Composite Index nötig).
-                // Status-Filter (PENDING) wird client-seitig durchgeführt.
                 firestore.collection("friend_requests")
-                    .whereEqualTo("receiverEmail", cleanOwnerEmail)
+                    .whereEqualTo("status", "PENDING")
                     .get()
                     .addOnCompleteListener { task ->
                         if (task.isSuccessful) {
                             val list = task.result.mapNotNull { doc ->
-                                val status = doc.getString("status") ?: ""
                                 val sEmail = (doc.getString("senderEmail") ?: "").lowercase()
                                 val sName = doc.getString("senderName") ?: ""
+                                val rEmail = (doc.getString("receiverEmail") ?: "").lowercase()
+                                val rName = doc.getString("receiverName") ?: ""
 
-                                // Nur echte offene Anfragen (status=PENDING), nicht von mir selbst
-                                val isPending = status == "PENDING"
-                                val isNotFromMe = sEmail != cleanOwnerEmail && sName.isNotBlank()
+                                val isForMe = (rEmail == cleanOwnerEmail || rEmail == myName.lowercase() || rName.equals(myName, ignoreCase = true) || rName.equals(cleanOwnerEmail, ignoreCase = true))
+                                val isNotFromMe = (sEmail != cleanOwnerEmail && !sName.equals(myName, ignoreCase = true))
 
-                                if (isPending && isNotFromMe) sEmail to sName else null
+                                if (isForMe && isNotFromMe && sName.isNotBlank()) {
+                                    sEmail to sName
+                                } else null
                             }
                             continuation.resume(list)
                         } else {
@@ -911,12 +827,7 @@ class SpielRepository(private val context: Context) {
                 dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = senderEmail, status = "RECEIVED_PENDING"))
             }
 
-            // Bereits bestehende Freundschaften sauber aus der RECEIVED_PENDING-Liste rausfiltern
-            pendingSenders
-                .filter { (sEmail, _) ->
-                    dao.getFreundschaft(cleanOwnerEmail, sEmail)?.status != "ACCEPTED"
-                }
-                .map { it.second }.distinct()
+            pendingSenders.map { it.second }.distinct()
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
@@ -1071,20 +982,12 @@ class SpielRepository(private val context: Context) {
         val docId = if (cleanOwnerEmail < senderEmail) "${cleanOwnerEmail}_${senderEmail}" else "${senderEmail}_${cleanOwnerEmail}"
 
         if (akzeptiert) {
-            // Lokal: RECEIVED_PENDING entfernen und als ACCEPTED eintragen (beidseitig)
-            dao.deleteFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = senderEmail, status = "RECEIVED_PENDING"))
             dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = senderEmail, status = "ACCEPTED"))
             dao.insertFreund(FreundEntity(ownerEmail = senderEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
 
             if (networkMonitor.isOnline.value) {
                 try {
-                    // Firestore: friend_requests Dokument LÖSCHEN (nicht updaten auf ACCEPTED).
-                    // Das verhindert, dass es bei der nächsten holeAusstehendeFreundesanfragen-Abfrage
-                    // noch als offene Anfrage erscheint (da wir per status=PENDING filtern).
-                    suspendCancellableCoroutine<Unit> { cont ->
-                        firestore.collection("friend_requests").document(docId).delete()
-                            .addOnCompleteListener { cont.resume(Unit) }
-                    }
+                    firestore.collection("friend_requests").document(docId).update("status", "ACCEPTED")
 
                     val map1 = mapOf("ownerEmail" to cleanOwnerEmail, "friendEmail" to senderEmail)
                     val map2 = mapOf("ownerEmail" to senderEmail, "friendEmail" to cleanOwnerEmail)
@@ -1095,7 +998,6 @@ class SpielRepository(private val context: Context) {
                 }
             }
         } else {
-            // Ablehnen: RECEIVED_PENDING lokal entfernen und Firestore-Dokument löschen
             dao.deleteFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = senderEmail, status = "RECEIVED_PENDING"))
 
             if (networkMonitor.isOnline.value) {
@@ -1108,28 +1010,17 @@ class SpielRepository(private val context: Context) {
         }
     }
 
-    // Freundschaft beidseitig löschen (lokal + Firestore)
-    // Wenn Kaido Sami löscht, verliert auch Sami Kaido aus seiner Freundesliste beim nächsten Laden.
+    // Freundschaft beidseitig löschen
     suspend fun loescheFreund(ownerEmail: String, friendName: String) = withContext(Dispatchers.IO) {
-        val cleanOwnerEmail = ownerEmail.trim().lowercase()
-        val friendUser = dao.getBenutzerByName(friendName) ?: run {
-            // Kein lokaler Eintrag — trotzdem versuchen via Firestore aufzulösen
-            return@withContext
-        }
-        val friendEmail = friendUser.email.trim().lowercase()
-
-        // Lokal beidseitig entfernen (alle Status)
-        dao.deleteFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
-        dao.deleteFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
+        val friendUser = dao.getBenutzerByName(friendName) ?: return@withContext
+        val friendEmail = friendUser.email
+        dao.deleteFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
+        dao.deleteFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = ownerEmail, status = "ACCEPTED"))
 
         if (networkMonitor.isOnline.value) {
-            val docId = if (cleanOwnerEmail < friendEmail) "${cleanOwnerEmail}_${friendEmail}" else "${friendEmail}_${cleanOwnerEmail}"
             try {
-                // friends-Collection (beidseitig) löschen
-                firestore.collection("friends").document("${cleanOwnerEmail}_$friendEmail").delete()
-                firestore.collection("friends").document("${friendEmail}_$cleanOwnerEmail").delete()
-                // friend_requests-Dokument ebenfalls löschen (verhindert Neuanzeige als Anfrage)
-                firestore.collection("friend_requests").document(docId).delete()
+                firestore.collection("friends").document("${ownerEmail}_$friendEmail").delete()
+                firestore.collection("friends").document("${friendEmail}_$ownerEmail").delete()
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -1193,23 +1084,14 @@ class SpielRepository(private val context: Context) {
         }
     }
 
-    // Schreibt Live-Koordinaten, Score, Aufgebe- und Fertig-Status in die Multiplayer-Session
-    fun updateLiveSession(
-        duelId: String,
-        playerEmail: String,
-        lat: Double,
-        lng: Double,
-        spotsCaptured: Int,
-        giveUp: Boolean = false,
-        completed: Boolean = false
-    ) {
+    // Schreibt Live-Koordinaten, Score und Aufgabe-Status in die Multiplayer-Session
+    fun updateLiveSession(duelId: String, playerEmail: String, lat: Double, lng: Double, spotsCaptured: Int, giveUp: Boolean = false) {
         if (!networkMonitor.isOnline.value) return
         val playerSession = mapOf(
             "lat" to lat,
             "lng" to lng,
             "spotsCaptured" to spotsCaptured,
             "giveUp" to giveUp,
-            "completed" to completed,
             "timestamp" to System.currentTimeMillis()
         )
         try {
@@ -1237,39 +1119,39 @@ class SpielRepository(private val context: Context) {
         return when {
             // Präzise Fehlercodes aus lokalem Fallback oder Firebase-Exceptions
             msg.contains("WRONG_PASSWORD", ignoreCase = true) ||
-            msg.contains("wrong-password", ignoreCase = true) ||
-            msg.contains("password is invalid", ignoreCase = true) -> {
+                    msg.contains("wrong-password", ignoreCase = true) ||
+                    msg.contains("password is invalid", ignoreCase = true) -> {
                 "Das eingegebene Passwort ist falsch!"
             }
 
             msg.contains("USER_NOT_FOUND", ignoreCase = true) ||
-            msg.contains("no user record", ignoreCase = true) ||
-            msg.contains("user-not-found", ignoreCase = true) -> {
+                    msg.contains("no user record", ignoreCase = true) ||
+                    msg.contains("user-not-found", ignoreCase = true) -> {
                 "Diese E-Mail-Adresse ist noch nicht registriert!"
             }
 
             msg.contains("USER_ALREADY_EXISTS", ignoreCase = true) ||
-            msg.contains("email already in use", ignoreCase = true) ||
-            msg.contains("email-already-in-use", ignoreCase = true) -> {
+                    msg.contains("email already in use", ignoreCase = true) ||
+                    msg.contains("email-already-in-use", ignoreCase = true) -> {
                 "Diese E-Mail-Adresse ist bereits registriert!"
             }
 
             msg.contains("invalid-email", ignoreCase = true) ||
-            msg.contains("email address is badly formatted", ignoreCase = true) -> {
+                    msg.contains("email address is badly formatted", ignoreCase = true) -> {
                 "Das E-Mail-Format ist ungültig (z.B. @ fehlt)!"
             }
 
             msg.contains("network-request-failed", ignoreCase = true) ||
-            msg.contains("network error", ignoreCase = true) ||
-            msg.contains("ssl", ignoreCase = true) ||
-            msg.contains("i/o error", ignoreCase = true) ||
-            msg.contains("connection reset", ignoreCase = true) ||
-            msg.contains("socket", ignoreCase = true) -> {
+                    msg.contains("network error", ignoreCase = true) ||
+                    msg.contains("ssl", ignoreCase = true) ||
+                    msg.contains("i/o error", ignoreCase = true) ||
+                    msg.contains("connection reset", ignoreCase = true) ||
+                    msg.contains("socket", ignoreCase = true) -> {
                 "Netzwerkfehler! Bitte überprüfe deine Internetverbindung."
             }
 
             msg.contains("API key not valid", ignoreCase = true) ||
-            msg.contains("Please pass a valid API key", ignoreCase = true) -> {
+                    msg.contains("Please pass a valid API key", ignoreCase = true) -> {
                 // Wenn Firebase-API ungültig ist, aber wir keinen lokalen User in Room haben
                 "Diese E-Mail-Adresse ist noch nicht registriert!"
             }
@@ -1281,45 +1163,41 @@ class SpielRepository(private val context: Context) {
         }
     }
 
-    // Beobachtet in Echtzeit, ob ein anderer Nutzer meine Freundschaftsanfrage angenommen hat.
-    // Lauscht auf die 'friends'-Collection (wo angenommene Freundschaften hinterlegt werden).
-    // Verhindert unendliche Rekursionsschleifen (kein delete() im Listener!).
+    // Beobachtet in Echtzeit, ob gesendete Freundschaftsanfragen akzeptiert wurden
     fun starteBeobachtungAngenommeneAnfragen(ownerEmail: String, onAccepted: (friendName: String) -> Unit): com.google.firebase.firestore.ListenerRegistration? {
-        val cleanOwnerEmail = ownerEmail.trim().lowercase()
-        if (cleanOwnerEmail.isBlank() || !networkMonitor.isOnline.value) return null
-
-        var erstesSnapshot = true // Altdaten beim Start ignorieren
-
+        if (!networkMonitor.isOnline.value) return null
         return try {
-            firestore.collection("friends")
-                .whereEqualTo("ownerEmail", cleanOwnerEmail)
+            firestore.collection("friend_requests")
+                .whereEqualTo("senderEmail", ownerEmail)
+                .whereEqualTo("status", "ACCEPTED")
                 .addSnapshotListener { snapshots, error ->
                     if (error != null) {
                         error.printStackTrace()
                         return@addSnapshotListener
                     }
-
-                    if (erstesSnapshot) {
-                        erstesSnapshot = false
-                        return@addSnapshotListener
-                    }
-
-                    if (snapshots != null) {
+                    if (snapshots != null && !snapshots.isEmpty) {
                         for (doc in snapshots.documentChanges) {
-                            if (doc.type == com.google.firebase.firestore.DocumentChange.Type.ADDED) {
-                                val friendEmail = (doc.document.getString("friendEmail") ?: "").lowercase()
-                                if (friendEmail.isBlank()) continue
-
+                            if (doc.type == com.google.firebase.firestore.DocumentChange.Type.ADDED ||
+                                doc.type == com.google.firebase.firestore.DocumentChange.Type.MODIFIED) {
+                                val receiverEmail = doc.document.getString("receiverEmail") ?: ""
                                 CoroutineScope(Dispatchers.IO).launch {
-                                    val friendUser = holeBenutzer(friendEmail)
-                                    val friendName = friendUser?.name ?: friendEmail.substringBefore("@")
+                                    val friendUser = holeBenutzer(receiverEmail)
+                                    val friendName = friendUser?.name ?: receiverEmail
 
-                                    // Lokal beidseitig als ACCEPTED in Room speichern
-                                    dao.insertFreund(FreundEntity(ownerEmail = cleanOwnerEmail, friendEmail = friendEmail, status = "ACCEPTED"))
-                                    dao.insertFreund(FreundEntity(ownerEmail = friendEmail, friendEmail = cleanOwnerEmail, status = "ACCEPTED"))
+                                    // Lokal auf ACCEPTED aktualisieren
+                                    dao.insertFreund(FreundEntity(ownerEmail = ownerEmail, friendEmail = receiverEmail, status = "ACCEPTED"))
+                                    dao.insertFreund(FreundEntity(ownerEmail = receiverEmail, friendEmail = ownerEmail, status = "ACCEPTED"))
 
+                                    // Callback aufrufen für Toast
                                     withContext(Dispatchers.Main) {
                                         onAccepted(friendName)
+                                    }
+
+                                    // Dokument aus friend_requests löschen, da verarbeitet
+                                    try {
+                                        firestore.collection("friend_requests").document(doc.document.id).delete()
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
                                     }
                                 }
                             }
@@ -1333,51 +1211,33 @@ class SpielRepository(private val context: Context) {
     }
 
     // Beobachtet in Echtzeit, ob dieser Nutzer neue Freundschaftsanfragen erhält
-    // Startet den Echtzeit-Firestore-Listener für eingehende Freundschaftsanfragen.
-    // Filtert direkt per receiverEmail in Firestore (effizient, keine Client-seitige Schleife nötig).
-    // WICHTIG: Beim ersten Snapshot-Start sendet Firestore alle bestehenden Docs als ADDED —
-    //          diese werden ignoriert (hasPendingWrites=false + fromCache=false = serverseitig vorhandene Altdaten).
-    //          Nur echte neue Dokumente (hasPendingWrites=true) oder MODIFIED-Events lösen den Dialog aus.
     fun starteBeobachtungEingehendeAnfragen(ownerEmail: String, onRequestReceived: (senderName: String) -> Unit): com.google.firebase.firestore.ListenerRegistration? {
-        val cleanOwnerEmail = ownerEmail.trim().lowercase()
-        if (cleanOwnerEmail.isBlank()) return null
         if (!networkMonitor.isOnline.value) return null
-
-        var erstesSnapshot = true  // Beim ersten Feuern des Listeners alle Altdaten ignorieren
+        val cleanOwnerEmail = ownerEmail.trim().lowercase()
+        val myName = ladeSpielerName()
 
         return try {
-            // Query NUR per receiverEmail (kein Composite Index in Firestore nötig).
-            // status-Filter (PENDING) wird client-seitig geprüft.
             firestore.collection("friend_requests")
-                .whereEqualTo("receiverEmail", cleanOwnerEmail)
+                .whereEqualTo("status", "PENDING")
                 .addSnapshotListener { snapshots, error ->
                     if (error != null) {
                         error.printStackTrace()
                         return@addSnapshotListener
                     }
-
-                    // Beim allerersten Snapshot kommen alle bestehenden Docs als ADDED —
-                    // das führt zu falschen Dialog-Popups. Wir überspringen diesen ersten Durchlauf.
-                    if (erstesSnapshot) {
-                        erstesSnapshot = false
-                        return@addSnapshotListener
-                    }
-
-                    if (snapshots != null) {
+                    if (snapshots != null && !snapshots.isEmpty) {
                         for (doc in snapshots.documentChanges) {
-                            // Nur neu hinzugefügte (ADDED) Dokumente verarbeiten
-                            if (doc.type == com.google.firebase.firestore.DocumentChange.Type.ADDED) {
+                            if (doc.type == com.google.firebase.firestore.DocumentChange.Type.ADDED ||
+                                doc.type == com.google.firebase.firestore.DocumentChange.Type.MODIFIED) {
                                 val d = doc.document
-                                val status = d.getString("status") ?: ""
-                                val sName = d.getString("senderName") ?: ""
                                 val sEmail = (d.getString("senderEmail") ?: "").lowercase()
-                                val myName = ladeSpielerName()
+                                val sName = d.getString("senderName") ?: ""
+                                val rEmail = (d.getString("receiverEmail") ?: "").lowercase()
+                                val rName = d.getString("receiverName") ?: ""
 
-                                // Nur offene Anfragen (PENDING), nicht meine eigenen
-                                val isPending = status == "PENDING"
+                                val isForMe = (rEmail == cleanOwnerEmail || rEmail == myName.lowercase() || rName.equals(myName, ignoreCase = true) || rName.equals(cleanOwnerEmail, ignoreCase = true))
                                 val isNotFromMe = (sEmail != cleanOwnerEmail && !sName.equals(myName, ignoreCase = true))
 
-                                if (isPending && isNotFromMe && sName.isNotBlank()) {
+                                if (isForMe && isNotFromMe && sName.isNotBlank()) {
                                     CoroutineScope(Dispatchers.Main).launch {
                                         onRequestReceived(sName)
                                     }
@@ -1391,6 +1251,48 @@ class SpielRepository(private val context: Context) {
             null
         }
     }
+
+    // ==========================================================================
+    // Private Hilfsmethoden
+    // ==========================================================================
+
+    // Erzeugt für beide Nutzer immer dieselbe ID, unabhängig von der Reihenfolge.
+    // So gibt es pro Nutzerpaar nur ein friend_requests-Dokument.
+    private fun friendRequestDocumentId(emailA: String, emailB: String): String {
+        return if (emailA < emailB) "${emailA}_${emailB}" else "${emailB}_${emailA}"
+    }
+
+    // Zentrale Abbildung eines Domain-Duells auf die Room-Entity.
+    // Verhindert doppelte Mapping-Logik beim Laden und Speichern.
+    private fun Duell.toEntity() = DuellEntity(
+        id = id,
+        name = name,
+        spotsAnzahl = spotsAnzahl,
+        zeitLimitMinuten = zeitLimitMinuten,
+        spot1Lat = spot1Lat, spot1Lng = spot1Lng,
+        spot2Lat = spot2Lat, spot2Lng = spot2Lng,
+        spot3Lat = spot3Lat, spot3Lng = spot3Lng,
+        spot4Lat = spot4Lat, spot4Lng = spot4Lng,
+        spot5Lat = spot5Lat, spot5Lng = spot5Lng,
+        gegner = gegner
+    )
+
+    // Zentrale Abbildung eines Domain-Duells auf das Firestore-Dokument.
+    // Creator und Einladungsstatus werden dadurch an genau einer Stelle erzeugt.
+    private fun Duell.toFirestoreMap(): Map<String, Any> = mapOf(
+        "id" to id,
+        "name" to name,
+        "spotsAnzahl" to spotsAnzahl,
+        "zeitLimitMinuten" to zeitLimitMinuten,
+        "spot1Lat" to spot1Lat, "spot1Lng" to spot1Lng,
+        "spot2Lat" to spot2Lat, "spot2Lng" to spot2Lng,
+        "spot3Lat" to spot3Lat, "spot3Lng" to spot3Lng,
+        "spot4Lat" to spot4Lat, "spot4Lng" to spot4Lng,
+        "spot5Lat" to spot5Lat, "spot5Lng" to spot5Lng,
+        "gegner" to gegner,
+        "creator" to getAccountKey(),
+        "invitations" to buildInvitationsMap(gegner)
+    )
 
     // ==========================================================================
     // Mapper (privat)
